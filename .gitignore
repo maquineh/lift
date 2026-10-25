@@ -1,0 +1,10 @@
+/target/
+**/.truxt_cache/
+/dist/
+/examples/*.exe
+/examples/fibonacci
+/examples/ownership
+/examples/interop
+/examples/stdlib
+/examples/io
+/examples/registry

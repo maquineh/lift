@@ -1,0 +1,15 @@
+// EN: Recursive and iterative Fibonacci with integer arithmetic.
+// PT-BR: Fibonacci recursivo e iterativo com aritmética inteira.
+function fibonacci(n: int): int {
+    if n <= 1 {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+const result = fibonacci(10);
+if result != 55 {
+    // A indexação fora do intervalo interrompe a execução se fib(10) estiver errado.
+    const sentinel: int[] = [1];
+    const failed = sentinel[1];
+}

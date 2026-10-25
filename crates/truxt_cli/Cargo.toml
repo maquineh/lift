@@ -1,0 +1,18 @@
+[package]
+name = "truxt_cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI do compilador Truxt"
+
+[[bin]]
+name = "truxt"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true
+truxt_ast.workspace = true
+truxt_codegen.workspace = true
+truxt_lexer.workspace = true
+truxt_parser.workspace = true
+truxt_sema.workspace = true

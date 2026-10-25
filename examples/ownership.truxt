@@ -1,0 +1,29 @@
+// EN: Aggregate mutation and owned returns without explicit Rust borrowing syntax.
+// PT-BR: Mutação de agregados e retornos próprios sem sintaxe explícita de borrow Rust.
+interface Counter {
+    value: int
+}
+
+function increment(counter: Counter): void {
+    counter.value = counter.value + 1;
+}
+
+function keep(counter: Counter): Counter {
+    return counter;
+}
+
+const original: Counter = { value: 1 };
+increment(original);
+const owned = keep(original);
+increment(owned);
+
+if original.value != 2 {
+    // O empréstimo mutável deve alterar a origem; a passagem owned deve cloná-la.
+    const sentinel: int[] = [1];
+    const failed = sentinel[1];
+}
+if owned.value != 3 {
+    // A cópia retornada deve preservar o valor e aceitar uma mutação independente.
+    const sentinel: int[] = [1];
+    const failed = sentinel[1];
+}

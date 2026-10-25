@@ -1,0 +1,4 @@
+// EN: Real registry import; the exact version is pinned in the generated manifest.
+// PT-BR: Import real do registry; a versão exata é fixada no manifesto gerado.
+import function gcd(left: int, right: int): int from "num-integer@0.1.46::gcd";
+console.log(gcd(84, 30));

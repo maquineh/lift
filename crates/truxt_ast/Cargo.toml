@@ -1,0 +1,7 @@
+[package]
+name = "truxt_ast"
+version.workspace = true
+edition.workspace = true
+description = "Tipos da AST não tipada do Truxt"
+
+[dependencies]

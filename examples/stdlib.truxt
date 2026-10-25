@@ -1,0 +1,31 @@
+// EN: FFI-compatible array and string helpers; borrowed inputs remain reusable.
+// PT-BR: Helpers de array e string compatíveis com FFI; entradas continuam disponíveis.
+import function length(values: int[]): int from "truxt_core::interop::array_len";
+import function string_array_length(values: string[]): int from "truxt_core::interop::array_len";
+import function text_length(value: string): int from "truxt_core::interop::string_len";
+import function trim(value: string): string from "truxt_core::interop::string_trim";
+import function contains_int(values: int[], value: int): boolean from "truxt_core::interop::array_contains_int";
+import function contains_number(values: number[], value: number): boolean from "truxt_core::interop::array_contains_number";
+import function contains_boolean(values: boolean[], value: boolean): boolean from "truxt_core::interop::array_contains_boolean";
+import function contains_string(values: string[], value: string): boolean from "truxt_core::interop::array_contains_string";
+
+const values: int[] = [2, 4, 6];
+const words: string[] = ["first", "ação"];
+let total: int = 0;
+let index: int = 0;
+while index < length(values) {
+    total = total + values[index];
+    index = index + 1;
+}
+console.log(total);
+console.log(length(values));
+console.log(string_array_length(words));
+console.log(contains_int(values, 4));
+console.log(contains_int(values, 5));
+console.log(contains_number([1.5, 2.5], 2.5));
+console.log(contains_boolean([true, false], false));
+console.log(contains_string(words, "ação"));
+console.log(text_length("é🙂"));
+console.log(trim("  Truxt  "));
+console.log(values[0]);
+console.log(words[1]);

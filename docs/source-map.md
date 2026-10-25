@@ -1,0 +1,63 @@
+# Source map
+
+[Português do Brasil](source-map.pt-BR.md) · [User guide](../README.md) · [Result and I/O](result-and-io.md)
+
+The compiler pipeline is `.truxt` → tokens → untyped AST → validated typed HIR → Rust → Cargo → native executable. Each Rust source module has an English overview and a Brazilian Portuguese overview. The tables below describe every source file, its contracts, and where its behavior is checked.
+
+## Workspace and compiler
+
+| File | Responsibility |
+| --- | --- |
+| `Cargo.toml` | Workspace members, shared version/edition, dependencies between compiler crates. |
+| `Cargo.lock` | Locked compiler dependency graph; install and package commands use `--locked`. |
+| `.gitignore` | Exclude compiler artifacts, generated projects at every depth, native example binaries, and distribution ZIPs. |
+| `crates/*/Cargo.toml` | Each compiler crate's dependencies; `truxt_cli` also declares the `truxt` executable. |
+| `crates/truxt_ast/src/lib.rs` | Untyped declarations, statements, expressions, imports, and type syntax, including special `Result<T, E>` types. No parsing or semantics. |
+| `crates/truxt_ast/src/span.rs` | Shared half-open UTF-8 byte spans and span utilities. |
+| `crates/truxt_lexer/src/lib.rs` | Logos tokens, lexical errors, byte offsets, raw string-escape text, and lexer unit tests. |
+| `crates/truxt_parser/src/lib.rs` | Public `parse` entry point returning AST or accumulated syntax errors. |
+| `crates/truxt_parser/src/parser.rs` | Recursive-descent declarations/statements, Pratt expressions, explicit import signatures, Result type arguments, and recovery. |
+| `crates/truxt_parser/src/error.rs` | Syntax-error categories, expected constructs, and source spans. |
+| `crates/truxt_sema/src/lib.rs` | Public typed HIR, resolved types, ownership modes, Result builtin names, semantic diagnostics, and `analyze` export. |
+| `crates/truxt_sema/src/analyzer.rs` | Scopes, types, nominal objects, function checks, conservative ownership, alias checks, Result operations, and HIR production. |
+| `crates/truxt_sema/src/interop.rs` | Validate FFI types, safe import paths, exact registry versions, and dependency identity. |
+| `crates/truxt_codegen/src/lib.rs` | Emit Rust and Cargo manifests from validated HIR, including clones, evaluation temporaries, safe FFI wrappers, and Result inspection. |
+| `crates/truxt_cli/src/lib.rs` | Commands, source diagnostics, embedded-core extraction, generated projects, Cargo invocation, artifact lookup, and program execution. |
+| `crates/truxt_cli/src/main.rs` | Forward the CLI result as the process exit code. |
+
+AST and HIR nodes retain source spans. `analyze` never returns partial HIR after an error. Code generation consumes semantic decisions rather than inferring ownership again. The core's embedded source list is explicit in the CLI; add any new core module there as well.
+
+## Standard library
+
+| File | Responsibility |
+| --- | --- |
+| `stdlib/truxt_core/Cargo.toml` | Dependency-free native Rust library in the source workspace. The embedded copy receives a standalone manifest without workspace inheritance. |
+| `stdlib/truxt_core/src/lib.rs` | Public modules and the `Console` re-export. |
+| `stdlib/truxt_core/src/console.rs` | Rust console output with `Display` and `io::Result`; `console.log` is a compiler binding. |
+| `stdlib/truxt_core/src/array.rs` | Borrowed slice operations, including Rust-only callbacks and borrowed results. |
+| `stdlib/truxt_core/src/string.rs` | Borrowed UTF-8 helpers; length counts Unicode scalar values. |
+| `stdlib/truxt_core/src/interop.rs` | FFI-compatible lengths, owned trim results, and array membership adapters; native Rust APIs remain available. |
+| `stdlib/truxt_core/src/io.rs` | UTF-8 arguments/stdin/files, returning `Result<T, String>` with contextual errors. |
+| `stdlib/truxt_core/README.md`, `README.pt-BR.md` | Public Rust and Truxt library guides in both languages. |
+
+## Acceptance tests and examples
+
+| File | Coverage or purpose |
+| --- | --- |
+| `crates/truxt_parser/tests/parser_contract.rs` | Precedence, postfix syntax, recovery, required semicolons, imports, and Result type syntax. |
+| `crates/truxt_sema/tests/semantic_contract.rs` | Types, recursion, borrow modes, alias rejection, imports, builtins, and Result validation. |
+| `crates/truxt_codegen/tests/codegen_contract.rs` | Generated Rust and Cargo contracts, safe wrappers, Result types, clones, and argument staging. |
+| `crates/truxt_cli/tests/cli_end_to_end.rs` | Compile/run examples, copy/move the CLI, inspect Cargo dependency paths, arguments/stdin/files, handled errors, and explicit unwrap failure. The registry test is opt-in because it can use the network. |
+| `examples/fibonacci.truxt` | Recursive and iterative integer control flow. |
+| `examples/ownership.truxt` | Mutation and owned values without explicit Rust borrow notation. |
+| `examples/interop.truxt` | Safe local imports, borrowed arrays/strings, and `console.log`. |
+| `examples/stdlib.truxt` | FFI-compatible lengths, membership, trimming, and iteration. |
+| `examples/io.truxt` | Handle Result values while reading arguments/stdin and writing/reading UTF-8 files. |
+| `examples/registry.truxt` | Consume `num-integer` 0.1.46 from the registry and print a GCD. |
+| `scripts/package.ps1` | Build for the current Rust host and create a portable ZIP with executable, guides, and examples. |
+
+Unit tests remain alongside span, lexer, and standard-library implementations. Run `cargo test --workspace` and the explicit registry test from the root README. A passing set demonstrates the cases it executes, rather than all possible ownership patterns or Rust APIs.
+
+## Design records
+
+Internal records live in `.agents/skills/truxt-compiler/`: `SKILL.md` defines contributor workflow; `references/architecture.md` is the original target blueprint; phase 1/2/3 records describe implemented syntax and semantics; `codegen-cli-decisions.md` records lowering/Cargo behavior; `phase5-decisions.md` records the limited safe import and console contract. The current user-facing Result/I/O contract is documented in `docs/result-and-io.md` and its Portuguese counterpart. A roadmap item in the blueprint does not mean that it is implemented.

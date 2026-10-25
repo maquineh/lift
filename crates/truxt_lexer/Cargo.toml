@@ -1,0 +1,9 @@
+[package]
+name = "truxt_lexer"
+version.workspace = true
+edition.workspace = true
+description = "Lexer do Truxt, com tokens e spans de origem"
+
+[dependencies]
+logos.workspace = true
+truxt_ast.workspace = true

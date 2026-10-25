@@ -1,0 +1,7 @@
+[package]
+name = "truxt_core"
+version.workspace = true
+edition.workspace = true
+description = "Biblioteca base Rust do Truxt: Console, arrays e strings"
+
+[dependencies]

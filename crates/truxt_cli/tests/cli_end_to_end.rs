@@ -1,0 +1,551 @@
+//! CLI acceptance tests for generated programs, bundled core, and runtime I/O.
+//!
+//! PT-BR: Testes de aceite da CLI para programas gerados, core embutido e I/O.
+
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Output, Stdio},
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+static NEXT_TEMP_DIR: AtomicUsize = AtomicUsize::new(0);
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(label: &str) -> Self {
+        let sequence = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("truxt-{label}-{}-{sequence}", std::process::id()));
+        fs::create_dir_all(&path).expect("diretório temporário deve ser criado");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn cli() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_truxt"))
+}
+
+fn assert_success(output: &Output, context: &str) {
+    assert!(
+        output.status.success(),
+        "{context} falhou\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn binary_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn run_with_input(mut command: Command, input: &str) -> Output {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("processo deve iniciar");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .expect("entrada deve ser enviada");
+    child.wait_with_output().expect("processo deve terminar")
+}
+
+#[test]
+fn copied_cli_uses_bundled_core_after_relocation() {
+    let directory = TempDir::new("relocation");
+    let original_install = directory.path().join("original-install");
+    fs::create_dir_all(&original_install).unwrap();
+    fs::copy(
+        env!("CARGO_BIN_EXE_truxt"),
+        original_install.join(binary_name("truxt")),
+    )
+    .unwrap();
+    let moved_install = directory.path().join("moved-install");
+    fs::rename(&original_install, &moved_install).unwrap();
+    let executable = moved_install.join(binary_name("truxt"));
+    let work = directory.path().join("independent-project");
+    fs::create_dir_all(&work).unwrap();
+    let source = work.join("stdlib.truxt");
+    fs::write(&source, include_str!("../../../examples/stdlib.truxt")).unwrap();
+
+    for command in ["check", "build", "run"] {
+        let output = Command::new(&executable)
+            .current_dir(&work)
+            .arg(command)
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert_success(&output, &format!("CLI relocada: {command}"));
+        if command == "run" {
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .replace("\r\n", "\n")
+                .ends_with("12\n3\n2\ntrue\nfalse\ntrue\ntrue\ntrue\n2\nTruxt\n2\nação\n"));
+        }
+    }
+
+    let project = work.join(".truxt_cache/stdlib");
+    let core_manifest = project.join("truxt_core/Cargo.toml");
+    let manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(!manifest.replace('\\', "/").contains(&checkout));
+    let metadata = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(project.join("Cargo.toml"))
+        .output()
+        .unwrap();
+    assert_success(&metadata, "cargo metadata do projeto relocável");
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+    let core = metadata["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["name"] == "truxt_core")
+        .expect("core embutido deve integrar a resolução Cargo");
+    assert_eq!(
+        fs::canonicalize(core["manifest_path"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(core_manifest).unwrap()
+    );
+    assert!(project.join("truxt_core/src/interop.rs").is_file());
+    assert!(project.join("truxt_core/src/io.rs").is_file());
+}
+
+#[test]
+fn io_example_receives_arguments_stdin_and_round_trips_utf8_files() {
+    let directory = TempDir::new("io");
+    let source_dir = directory.path().join("sources");
+    fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("io.truxt");
+    fs::write(&source, include_str!("../../../examples/io.truxt")).unwrap();
+    for command in ["check", "build"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, command);
+    }
+
+    let file = directory.path().join("ação.txt");
+    let mut binary = Command::new(source_dir.join(binary_name("io")));
+    binary
+        .current_dir(directory.path())
+        .arg("ação.txt")
+        .arg("ação🙂");
+    let output = run_with_input(binary, "\t Olá\nTruxt \n");
+    assert_success(&output, "binário de I/O");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        "2\nOlá\nTruxt|ação🙂\n"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), "Olá\nTruxt|ação🙂");
+
+    let mut run = cli();
+    run.current_dir(directory.path())
+        .arg("run")
+        .arg(&source)
+        .arg("--")
+        .arg(&file)
+        .arg("second");
+    let output = run_with_input(run, " second input \n");
+    assert_success(&output, "truxt run com argumentos e stdin");
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .replace("\r\n", "\n")
+        .ends_with("2\nsecond input|second\n"));
+    assert_eq!(fs::read_to_string(file).unwrap(), "second input|second");
+
+    let mut empty = Command::new(source_dir.join(binary_name("io")));
+    empty
+        .current_dir(directory.path())
+        .arg("empty.txt")
+        .arg("empty");
+    let output = run_with_input(empty, "");
+    assert_success(&output, "stdin vazio");
+    assert_eq!(
+        fs::read_to_string(directory.path().join("empty.txt")).unwrap(),
+        "|empty"
+    );
+    assert!(!source_dir.join("ação.txt").exists());
+}
+
+#[test]
+fn run_preserves_flag_and_spaced_arguments_without_the_executable_name() {
+    let directory = TempDir::new("arguments");
+    let source = directory.path().join("arguments.truxt");
+    fs::write(
+        &source,
+        r#"
+        import function arguments(): Result<string[], string> from "truxt_core::io::arguments";
+        import function length(values: string[]): int from "truxt_core::interop::array_len";
+        const args: string[] = result.unwrap(arguments());
+        console.log(length(args));
+        console.log(args[0]);
+        console.log(args[1]);
+    "#,
+    )
+    .unwrap();
+    let output = cli()
+        .arg("run")
+        .arg(source)
+        .args(["--", "--flag", "a b"])
+        .output()
+        .unwrap();
+    assert_success(&output, "argumentos preservados");
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .replace("\r\n", "\n")
+        .ends_with("2\n--flag\na b\n"));
+}
+
+#[test]
+fn file_read_errors_are_values_that_truxt_can_handle() {
+    let directory = TempDir::new("io-failures");
+    let source = directory.path().join("read.truxt");
+    fs::write(
+        &source,
+        r#"
+        import function arguments(): Result<string[], string> from "truxt_core::io::arguments";
+        import function read_file(path: string): Result<string, string> from "truxt_core::io::read_file";
+        function forward(value: Result<string, string>): Result<string, string> { return value; }
+        function report(value: Result<string, string>): void {
+            if result.is_ok(value) {
+                console.log(result.unwrap(value));
+            } else {
+                console.log(result.unwrap_err(value));
+                console.log(result.is_ok(value));
+            }
+        }
+        const args: string[] = result.unwrap(arguments());
+        report(forward(read_file(args[0])));
+    "#,
+    )
+    .unwrap();
+    let missing = directory.path().join("missing.txt");
+    let output = cli()
+        .arg("run")
+        .arg(&source)
+        .arg("--")
+        .arg(&missing)
+        .output()
+        .unwrap();
+    assert_success(&output, "erros de arquivo são tratáveis");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("read_file"));
+    assert!(stdout.contains("missing.txt"));
+    assert!(stdout.replace("\r\n", "\n").ends_with("false\n"));
+
+    let invalid = directory.path().join("invalid.txt");
+    fs::write(&invalid, [0xff]).unwrap();
+    let output = cli()
+        .arg("run")
+        .arg(source)
+        .arg("--")
+        .arg(invalid)
+        .output()
+        .unwrap();
+    assert_success(&output, "UTF-8 inválido é tratável");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("read_file"));
+    assert!(stdout.contains("invalid.txt"));
+}
+
+#[test]
+fn unwrap_on_the_wrong_result_variant_is_an_explicit_runtime_failure() {
+    let directory = TempDir::new("unwrap");
+    let source = directory.path().join("unwrap.truxt");
+    fs::write(&source, r#"
+        import function read_file(path: string): Result<string, string> from "truxt_core::io::read_file";
+        console.log(result.unwrap(read_file("missing-result-file.txt")));
+    "#).unwrap();
+    let output = cli()
+        .current_dir(directory.path())
+        .arg("run")
+        .arg(source)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("result.unwrap called on Err"));
+}
+
+#[test]
+fn check_reports_a_missing_cargo_toolchain() {
+    let directory = TempDir::new("no-cargo");
+    let source = directory.path().join("empty.truxt");
+    fs::write(&source, "const value: int = 1;").unwrap();
+    let output = cli()
+        .current_dir(directory.path())
+        .env("PATH", "")
+        .arg("check")
+        .arg(source)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cargo check"));
+}
+
+#[test]
+#[ignore = "downloads a pinned registry crate; run explicitly for release acceptance"]
+fn registry_import_consumes_a_real_pinned_rust_crate() {
+    let directory = TempDir::new("registry");
+    let source = directory.path().join("registry.truxt");
+    fs::write(&source, include_str!("../../../examples/registry.truxt")).unwrap();
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("registry: {command}"));
+        if command == "run" {
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .replace("\r\n", "\n")
+                .ends_with("6\n"));
+        }
+    }
+    let manifest =
+        fs::read_to_string(directory.path().join(".truxt_cache/registry/Cargo.toml")).unwrap();
+    assert!(manifest.contains("num-integer"));
+    assert!(manifest.contains("=0.1.46"));
+}
+
+#[test]
+fn interop_check_build_run_prints_through_local_core_and_keeps_borrowed_values() {
+    let directory = TempDir::new("interop");
+    let source = directory.path().join("interop.truxt");
+    fs::write(&source, include_str!("../../../examples/interop.truxt")).unwrap();
+    for command in ["check", "build"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, command);
+    }
+    let binary = directory.path().join(if cfg!(windows) {
+        "interop.exe"
+    } else {
+        "interop"
+    });
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário interop");
+    let expected = "Olá, Truxt\nTruxt\n42\n2.5\ntrue\nfalse\nfalse\n1\nTruxt\nTruxt\n";
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+    let run = cli().arg("run").arg(&source).output().unwrap();
+    assert_success(&run, "truxt run interop");
+    assert!(String::from_utf8(run.stdout)
+        .unwrap()
+        .replace("\r\n", "\n")
+        .ends_with(expected));
+    let manifest =
+        fs::read_to_string(directory.path().join(".truxt_cache/interop/Cargo.toml")).unwrap();
+    assert!(manifest.contains("truxt_core = { path = "));
+}
+
+#[test]
+fn rustc_rejects_an_import_whose_declared_signature_does_not_match() {
+    let directory = TempDir::new("ffi-signature");
+    let source = directory.path().join("bad_signature.truxt");
+    fs::write(
+        &source,
+        r#"import function concat(left: int, right: int): int from "truxt_core::string::concat";"#,
+    )
+    .unwrap();
+    let output = cli().arg("check").arg(&source).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mismatched types"));
+}
+
+#[test]
+fn rustc_rejects_private_and_missing_import_targets() {
+    let directory = TempDir::new("ffi-targets");
+    for (file_name, source, diagnostic) in [
+        (
+            "private.truxt",
+            r#"import function hidden(value: int): int from "truxt_core::console::write_line";"#,
+            "private",
+        ),
+        (
+            "missing.truxt",
+            r#"import function missing(value: int): int from "truxt_core::string::no_such_function";"#,
+            "no_such_function",
+        ),
+    ] {
+        let source_path = directory.path().join(file_name);
+        fs::write(&source_path, source).expect("fonte FFI inválida deve ser gravada");
+        let output = cli()
+            .arg("check")
+            .arg(source_path)
+            .output()
+            .expect("CLI check deve iniciar");
+        assert!(
+            !output.status.success(),
+            "rustc deve rejeitar o destino {file_name}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "diagnóstico deve mencionar `{diagnostic}`: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn check_build_and_run_compile_and_execute_a_truxt_example() {
+    let directory = TempDir::new("e2e");
+    let source_path = directory.path().join("fibonacci.truxt");
+    fs::write(
+        &source_path,
+        include_str!("../../../examples/fibonacci.truxt"),
+    )
+    .expect("exemplo deve ser copiado para o diretório temporário");
+
+    let check = cli()
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("CLI check deve iniciar");
+    assert_success(&check, "truxt check");
+
+    let build = cli()
+        .arg("build")
+        .arg(&source_path)
+        .output()
+        .expect("CLI build deve iniciar");
+    assert_success(&build, "truxt build");
+    let binary_path = if cfg!(windows) {
+        directory.path().join("fibonacci.exe")
+    } else {
+        directory.path().join("fibonacci")
+    };
+    assert!(
+        binary_path.is_file(),
+        "build deve copiar o binário ao lado da fonte"
+    );
+
+    let run = cli()
+        .arg("run")
+        .arg(&source_path)
+        .output()
+        .expect("CLI run deve iniciar");
+    assert_success(&run, "truxt run");
+}
+
+#[test]
+fn check_build_and_run_compile_and_execute_the_ownership_example() {
+    let directory = TempDir::new("ownership");
+    let source_path = directory.path().join("ownership.truxt");
+    fs::write(
+        &source_path,
+        include_str!("../../../examples/ownership.truxt"),
+    )
+    .expect("exemplo deve ser copiado para o diretório temporário");
+
+    let check = cli()
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("CLI check deve iniciar");
+    assert_success(&check, "truxt check ownership");
+
+    let build = cli()
+        .arg("build")
+        .arg(&source_path)
+        .output()
+        .expect("CLI build deve iniciar");
+    assert_success(&build, "truxt build ownership");
+    let binary_path = if cfg!(windows) {
+        directory.path().join("ownership.exe")
+    } else {
+        directory.path().join("ownership")
+    };
+    assert!(
+        binary_path.is_file(),
+        "build deve copiar o binário ao lado da fonte"
+    );
+    let binary = Command::new(&binary_path)
+        .output()
+        .expect("binário de ownership deve iniciar");
+    assert_success(&binary, "binário de ownership");
+
+    let run = cli()
+        .arg("run")
+        .arg(&source_path)
+        .output()
+        .expect("CLI run deve iniciar");
+    assert_success(&run, "truxt run ownership");
+}
+
+#[test]
+fn init_creates_a_starter_file_and_refuses_to_overwrite_it() {
+    let directory = TempDir::new("init");
+    let init = cli()
+        .arg("init")
+        .arg(directory.path())
+        .output()
+        .expect("CLI init deve iniciar");
+    assert_success(&init, "truxt init");
+
+    let source = directory.path().join("main.truxt");
+    let original = fs::read_to_string(&source).expect("init deve criar main.truxt");
+    assert!(original.contains("Programa Truxt inicial"));
+
+    let repeated = cli()
+        .arg("init")
+        .arg(directory.path())
+        .output()
+        .expect("CLI init deve iniciar novamente");
+    assert!(
+        !repeated.status.success(),
+        "init não deve sobrescrever arquivo existente"
+    );
+    assert_eq!(
+        fs::read_to_string(source).expect("arquivo deve continuar presente"),
+        original
+    );
+}
+
+#[test]
+fn check_reports_source_errors_with_location() {
+    let directory = TempDir::new("diagnostic");
+    let source = directory.path().join("invalid.truxt");
+    fs::write(&source, "const value: int = true;").expect("fonte inválida deve ser gravada");
+
+    let output = cli()
+        .arg("check")
+        .arg(source)
+        .output()
+        .expect("CLI check deve iniciar");
+    assert!(
+        !output.status.success(),
+        "programa semanticamente inválido deve falhar"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid.truxt:1:"),
+        "diagnóstico deve apontar arquivo e linha: {stderr}"
+    );
+    assert!(
+        stderr.contains("erro:"),
+        "diagnóstico deve identificar o erro: {stderr}"
+    );
+}
