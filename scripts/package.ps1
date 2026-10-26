@@ -35,7 +35,15 @@ try {
         Copy-Item -LiteralPath (Join-Path $projectRoot "docs") -Destination $stagingDirectory -Recurse
         $examplesDirectory = Join-Path $stagingDirectory "examples"
         New-Item -ItemType Directory -Path $examplesDirectory | Out-Null
-        Get-ChildItem -LiteralPath (Join-Path $projectRoot "examples") -Filter "*.truxt" -File | Copy-Item -Destination $examplesDirectory
+        $examplesSourceDirectory = Join-Path $projectRoot "examples"
+        # EN: Preserve imported modules' relative paths and copy source files only.
+        # PT-BR: Preserva caminhos relativos dos módulos e copia apenas fontes.
+        Get-ChildItem -LiteralPath $examplesSourceDirectory -Filter "*.truxt" -File -Recurse | ForEach-Object {
+            $exampleRelativePath = $_.FullName.Substring($examplesSourceDirectory.Length + 1)
+            $exampleDestination = Join-Path $examplesDirectory $exampleRelativePath
+            New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($exampleDestination)) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $exampleDestination
+        }
         $coreGuideDirectory = Join-Path $stagingDirectory "stdlib/truxt_core"
         New-Item -ItemType Directory -Path $coreGuideDirectory -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $projectRoot "stdlib/truxt_core/README.md"), (Join-Path $projectRoot "stdlib/truxt_core/README.pt-BR.md") -Destination $coreGuideDirectory

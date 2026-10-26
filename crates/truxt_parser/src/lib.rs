@@ -12,7 +12,7 @@ mod parser;
 
 pub use error::{ParseError, ParseErrorKind};
 use truxt_ast::ProgramAst;
-use truxt_ast::Span;
+use truxt_ast::{SourceId, Span};
 use truxt_lexer::Token;
 
 /// Converte tokens com spans em um programa AST.
@@ -21,4 +21,19 @@ use truxt_lexer::Token;
 /// carregam spans compatíveis com `truxt_ast::Span`.
 pub fn parse(tokens: &[(Token, Span)]) -> Result<ProgramAst, Vec<ParseError>> {
     parser::Parser::new(tokens).parse_program()
+}
+
+/// Parses one source, including empty input; PT-BR: preserva o ID mesmo sem tokens.
+pub fn parse_with_source(
+    tokens: &[(Token, Span)],
+    source: SourceId,
+) -> Result<ProgramAst, Vec<ParseError>> {
+    if tokens.iter().all(|(_, span)| span.source == source) {
+        return parser::Parser::new_with_source(tokens, source).parse_program();
+    }
+    let normalized = tokens
+        .iter()
+        .map(|(token, span)| (token.clone(), span.with_source(source)))
+        .collect::<Vec<_>>();
+    parser::Parser::new_with_source(&normalized, source).parse_program()
 }

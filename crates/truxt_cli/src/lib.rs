@@ -21,6 +21,11 @@ use serde_json::Value;
 use truxt_codegen::{emit_cargo_manifest_for_program, emit_rust};
 use truxt_sema::{analyze, HirProgram};
 
+mod diagnostics;
+mod modules;
+mod sources;
+use diagnostics::report_diagnostic;
+
 const EMBEDDED_CORE_FILES: &[(&str, &str)] = &[
     ("Cargo.toml", EMBEDDED_CORE_CARGO_TOML),
     (
@@ -52,7 +57,7 @@ const EMBEDDED_CORE_FILES: &[(&str, &str)] = &[
 const EMBEDDED_CORE_CARGO_TOML: &str = concat!(
     "[package]\nname = \"truxt_core\"\nversion = \"",
     env!("CARGO_PKG_VERSION"),
-    "\"\nedition = \"2021\"\ndescription = \"Truxt base library: console, arrays, strings, and UTF-8 I/O\"\n"
+    "\"\nedition = \"2021\"\nrust-version = \"1.94.1\"\ndescription = \"Truxt base library: console, arrays, strings, and UTF-8 I/O\"\n"
 );
 
 #[derive(Parser)]
@@ -193,37 +198,17 @@ fn generate_project(input: &Path) -> Result<GeneratedProject, CliError> {
             "a extensão do arquivo fonte deve ser `.truxt`",
         ));
     }
-    let source = fs::read_to_string(&source_path).map_err(|error| {
-        CliError::message(format!(
-            "não foi possível ler `{}`: {error}",
-            source_path.display()
-        ))
-    })?;
-
-    let tokens = match truxt_lexer::tokenize(&source) {
-        Ok(tokens) => tokens,
-        Err(error) => {
-            report_diagnostic(&source_path, &source, error.span, &error.to_string());
-            return Err(CliError::DiagnosticsReported);
-        }
-    };
-    let ast = match truxt_parser::parse(&tokens) {
-        Ok(ast) => ast,
-        Err(errors) => {
-            for error in errors {
-                report_diagnostic(&source_path, &source, error.span, &error.to_string());
-            }
-            return Err(CliError::DiagnosticsReported);
-        }
-    };
-    let hir = match analyze(ast) {
+    let loaded = modules::load_program(&source_path)?;
+    let hir = match analyze(loaded.ast) {
         Ok(hir) => hir,
         Err(errors) => {
             for error in errors {
-                report_diagnostic(&source_path, &source, error.span, &error.to_string());
-                if let Some(secondary) = error.secondary_span {
-                    report_diagnostic(&source_path, &source, secondary, "local relacionado");
-                }
+                report_diagnostic(
+                    &loaded.sources,
+                    error.span,
+                    error.secondary_span,
+                    &error.to_string(),
+                );
             }
             return Err(CliError::DiagnosticsReported);
         }
@@ -257,13 +242,13 @@ fn write_generated_project(
     let manifest = emit_cargo_manifest_for_program(stem, hir, "truxt_core");
     let generated_source = source_dir.join("main.rs");
     let manifest_path = cache_dir.join("Cargo.toml");
-    fs::write(&generated_source, rust_source).map_err(|error| {
+    write_if_changed(&generated_source, rust_source.as_bytes()).map_err(|error| {
         CliError::message(format!(
             "não foi possível gravar `{}`: {error}",
             generated_source.display()
         ))
     })?;
-    fs::write(&manifest_path, manifest).map_err(|error| {
+    write_if_changed(&manifest_path, manifest.as_bytes()).map_err(|error| {
         CliError::message(format!(
             "não foi possível gravar `{}`: {error}",
             manifest_path.display()
@@ -280,9 +265,6 @@ fn write_generated_project(
 fn materialize_embedded_core(destination: &Path) -> Result<(), CliError> {
     for (relative_path, contents) in EMBEDDED_CORE_FILES {
         let path = destination.join(relative_path);
-        if fs::read(&path).is_ok_and(|existing| existing == contents.as_bytes()) {
-            continue;
-        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 CliError::message(format!(
@@ -291,7 +273,7 @@ fn materialize_embedded_core(destination: &Path) -> Result<(), CliError> {
                 ))
             })?;
         }
-        fs::write(&path, contents).map_err(|error| {
+        write_if_changed(&path, contents.as_bytes()).map_err(|error| {
             CliError::message(format!(
                 "não foi possível gravar a stdlib embutida em `{}`: {error}",
                 path.display()
@@ -299,6 +281,18 @@ fn materialize_embedded_core(destination: &Path) -> Result<(), CliError> {
         })?;
     }
     Ok(())
+}
+
+/// Writes different bytes only; PT-BR: grava somente bytes diferentes dos existentes.
+fn write_if_changed(path: &Path, contents: &[u8]) -> std::io::Result<bool> {
+    match fs::read(path) {
+        Ok(existing) if existing == contents => return Ok(false),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::write(path, contents)?;
+    Ok(true)
 }
 
 fn cargo_build(project: &GeneratedProject) -> Result<CargoBuild, CliError> {
@@ -414,22 +408,6 @@ fn init_project(directory: &Path) -> Result<(), CliError> {
         })?;
     println!("Projeto inicializado: {}", source.display());
     Ok(())
-}
-
-fn report_diagnostic(path: &Path, source: &str, span: truxt_ast::Span, message: &str) {
-    let offset = span.start.min(source.len());
-    let mut boundary = offset;
-    while !source.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    let prefix = &source[..boundary];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let column = prefix
-        .rsplit('\n')
-        .next()
-        .map(|line| line.chars().count() + 1)
-        .unwrap_or(1);
-    eprintln!("{}:{line}:{column}: erro: {message}", path.display());
 }
 
 fn exit_code(status: std::process::ExitStatus) -> u8 {

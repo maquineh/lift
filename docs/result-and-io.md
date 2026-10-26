@@ -21,7 +21,7 @@ if result.is_ok(contents) {
 
 `result.is_ok(value)` borrows a Result and returns `boolean`. `result.unwrap(value)` returns an owned copy of the success payload; `result.unwrap_err(value)` returns an owned copy of the error payload. The payload is cloned, so the original Result remains available. A `Result<void, E>` success unwrap is a void expression and can be used as a statement. Each argument expression is evaluated once.
 
-Unwrapping the wrong variant panics. The compiler does not prove that a branch has checked the variant; callers must use `is_ok` appropriately. The `result` namespace must not be shadowed by a variable, function, or interface. There are no Result constructors in Truxt yet: values come from imports or are passed/returned by Truxt functions. Pattern matching, `?`, `try/catch`, unions, optional types, and general generics remain unimplemented.
+Unwrapping the wrong variant panics. The compiler does not prove that a branch has checked the variant; callers must use `is_ok` appropriately. The `result` namespace must not be shadowed. Result still has no constructors: values come from imports or Truxt functions. Pattern matching, the propagation operator `?`, `try/catch`, unions, and general generics remain unimplemented. Optional types and `??` follow [the separate Option contract](option.md).
 
 ## FFI contract
 

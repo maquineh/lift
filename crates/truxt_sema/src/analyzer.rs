@@ -11,13 +11,166 @@ use truxt_ast::{
 };
 
 use crate::{
-    ArgPassMode, BindingId, CallTempId, CloneMode, ExprDiscardMode, HirAssignment, HirBlock,
-    HirCallArgument, HirDeclaration, HirElseBranch, HirExpr, HirExprKind, HirExpressionStatement,
-    HirFunction, HirIf, HirImport, HirParameter, HirProgram, HirReturn, HirStatement, HirStruct,
-    HirStructField, HirStructInitField, HirVariableDeclaration, HirWhile, ParameterPassMode,
-    ResolvedType, RustDependency, SemaError, SemaErrorKind, CONSOLE_LOG_BUILTIN,
-    RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
+    ArgPassMode, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode, HirAssignment,
+    HirBlock, HirCallArgument, HirDeclaration, HirElseBranch, HirExpr, HirExprKind,
+    HirExpressionStatement, HirFunction, HirIf, HirImport, HirParameter, HirProgram, HirReturn,
+    HirStatement, HirStruct, HirStructField, HirStructInitField, HirVariableDeclaration, HirWhile,
+    ParameterPassMode, ResolvedType, RustDependency, SemaError, SemaErrorKind, CONSOLE_LOG_BUILTIN,
+    OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN,
+    RESULT_UNWRAP_ERR_BUILTIN,
 };
+
+fn method_name(target: &str, method: &str) -> String {
+    format!("$method:{target}:{method}")
+}
+
+fn lower_impls(mut ast: ProgramAst) -> Result<ProgramAst, Vec<SemaError>> {
+    let names = ast
+        .declarations
+        .iter()
+        .filter_map(|d| {
+            if let Declaration::Interface(i) = d {
+                Some(i.name.name.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<HashSet<_>>();
+    let mut declarations = Vec::new();
+    for declaration in ast.declarations {
+        if let Declaration::Impl(implementation) = declaration {
+            if !names.contains(&implementation.target.name) {
+                return Err(vec![SemaError::new(
+                    SemaErrorKind::UnknownType,
+                    "impl exige uma interface nominal existente",
+                    implementation.target.span,
+                )]);
+            }
+            for mut method in implementation.methods {
+                method.name.name = method_name(&implementation.target.name, &method.name.name);
+                method.parameters.insert(
+                    0,
+                    truxt_ast::Parameter {
+                        name: Identifier {
+                            name: "this".into(),
+                            span: implementation.target.span,
+                        },
+                        ty: TypeExpression {
+                            kind: TypeExpressionKind::Named(implementation.target.clone()),
+                            span: implementation.target.span,
+                        },
+                        span: implementation.target.span,
+                    },
+                );
+                declarations.push(Declaration::Function(method));
+            }
+        } else {
+            declarations.push(declaration);
+        }
+    }
+    ast.declarations = declarations;
+    Ok(ast)
+}
+
+// Lexical free names: nested arrows contribute only their actual free names.
+fn closure_free_names(closure: &truxt_ast::ClosureExpression) -> HashSet<String> {
+    fn expression(e: &Expression, bound: &HashSet<String>, free: &mut HashSet<String>) {
+        match &e.kind {
+            ExpressionKind::Identifier(i) => {
+                if !bound.contains(&i.name) {
+                    free.insert(i.name.clone());
+                }
+            }
+            ExpressionKind::Closure(c) => {
+                for name in closure_free_names(c) {
+                    if !bound.contains(&name) {
+                        free.insert(name);
+                    }
+                }
+            }
+            ExpressionKind::Template(parts) => {
+                for e in parts {
+                    expression(e, bound, free);
+                }
+            }
+            ExpressionKind::ObjectLiteral(o) => {
+                for f in &o.fields {
+                    expression(&f.value, bound, free);
+                }
+            }
+            ExpressionKind::ArrayLiteral(a) => {
+                for e in &a.elements {
+                    expression(e, bound, free);
+                }
+            }
+            ExpressionKind::Unary(u) => expression(&u.operand, bound, free),
+            ExpressionKind::Binary(b) => {
+                expression(&b.left, bound, free);
+                expression(&b.right, bound, free);
+            }
+            ExpressionKind::FieldAccess(f) => expression(&f.object, bound, free),
+            ExpressionKind::Index(i) => {
+                expression(&i.object, bound, free);
+                expression(&i.index, bound, free);
+            }
+            ExpressionKind::Grouping(e) => expression(e, bound, free),
+            ExpressionKind::Call(c) => {
+                expression(&c.callee, bound, free);
+                for a in &c.arguments {
+                    expression(a, bound, free);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn conditional(
+        i: &truxt_ast::IfStatement,
+        bound: &HashSet<String>,
+        free: &mut HashSet<String>,
+    ) {
+        expression(&i.condition, bound, free);
+        block(&i.then_branch, &mut bound.clone(), free);
+        if let Some(branch) = &i.else_branch {
+            match &branch.kind {
+                ElseBranchKind::Block(b) => block(b, &mut bound.clone(), free),
+                ElseBranchKind::ElseIf(i) => conditional(i, bound, free),
+            }
+        }
+    }
+    fn block(b: &Block, bound: &mut HashSet<String>, free: &mut HashSet<String>) {
+        for statement in &b.statements {
+            match statement {
+                Statement::Variable(v) => {
+                    expression(&v.initializer, bound, free);
+                    bound.insert(v.name.name.clone());
+                }
+                Statement::Assignment(a) => {
+                    expression(&a.target, bound, free);
+                    expression(&a.value, bound, free);
+                }
+                Statement::Expression(e) => expression(&e.expression, bound, free),
+                Statement::Return(r) => {
+                    if let Some(e) = &r.value {
+                        expression(e, bound, free);
+                    }
+                }
+                Statement::While(w) => {
+                    expression(&w.condition, bound, free);
+                    block(&w.body, &mut bound.clone(), free);
+                }
+                Statement::If(i) => conditional(i, bound, free),
+            }
+        }
+    }
+    let mut bound = closure
+        .parameters
+        .iter()
+        .map(|p| p.name.name.clone())
+        .collect();
+    let mut free = HashSet::new();
+    block(&closure.body, &mut bound, &mut free);
+    free
+}
 
 #[derive(Clone)]
 struct StructInfo {
@@ -68,6 +221,25 @@ struct Analyzer<'ast> {
 /// Constrói HIR tipado. Um `Ok` nunca contém tipo desconhecido nem recurso
 /// da AST que ainda não tenha suporte semântico.
 pub fn analyze(ast: ProgramAst) -> Result<HirProgram, Vec<SemaError>> {
+    let ast = lower_impls(ast)?;
+    let unresolved = ast
+        .declarations
+        .iter()
+        .filter_map(|declaration| {
+            if let Declaration::ModuleImport(import) = declaration {
+                Some(SemaError::new(
+                    SemaErrorKind::InvalidImport,
+                    "imports de módulo devem ser resolvidos antes da análise semântica",
+                    import.span,
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if !unresolved.is_empty() {
+        return Err(unresolved);
+    }
     Analyzer::new(&ast).run()
 }
 
@@ -142,6 +314,8 @@ impl<'ast> Analyzer<'ast> {
         let mut declarations = Vec::with_capacity(self.ast.declarations.len());
         for (index, declaration) in self.ast.declarations.iter().enumerate() {
             match declaration {
+                Declaration::ModuleImport(_) => {}
+                Declaration::Impl(_) => unreachable!("impl lowered before analysis"),
                 Declaration::Import(_) => {
                     if let Some(item) = self.import_by_declaration.get(&index) {
                         declarations.push(HirDeclaration::Import(item.clone()));
@@ -168,7 +342,9 @@ impl<'ast> Analyzer<'ast> {
         apply_mutable_binding_flags(&mut declarations, &self.mutable_bindings);
 
         if self.errors.is_empty() {
-            Ok(HirProgram { declarations })
+            let mut program = HirProgram { declarations };
+            crate::liveness::optimize(&mut program);
+            Ok(program)
         } else {
             Err(self.errors)
         }
@@ -281,7 +457,8 @@ impl<'ast> Analyzer<'ast> {
                         );
                     }
                 }
-                Declaration::Statement(_) => {}
+                Declaration::Statement(_) | Declaration::ModuleImport(_) => {}
+                Declaration::Impl(_) => unreachable!("impl lowered before analysis"),
             }
         }
 
@@ -480,7 +657,8 @@ impl<'ast> Analyzer<'ast> {
                     continue;
                 }
                 let mutated = block_mutates_name(&declaration.body, &parameter.name);
-                let escapes = block_returns_name(&declaration.body, &parameter.name);
+                let escapes = !(signature.name.starts_with("$method:") && parameter.name == "this")
+                    && block_returns_name(&declaration.body, &parameter.name);
                 parameter.mutated = mutated;
                 parameter.pass_mode = if escapes {
                     ParameterPassMode::OwnedMove
@@ -722,7 +900,18 @@ impl<'a> BodyChecker<'a> {
                     Some(ty) => self.check_expr(&variable.initializer, ty)?,
                     None => self.synthesize_expr(&variable.initializer)?,
                 };
-                if !initializer.ty.is_value_type() {
+                let is_closure = matches!(initializer.ty, ResolvedType::Closure(..));
+                if is_closure
+                    && (variable.binding != BindingKind::Const
+                        || !matches!(variable.initializer.kind, ExpressionKind::Closure(_)))
+                {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "closures exigem declaração const direta e não podem ser copiadas",
+                        variable.span,
+                    ));
+                }
+                if !initializer.ty.is_value_type() && !is_closure {
                     return Err(SemaError::new(
                         SemaErrorKind::TypeMismatch,
                         "uma variável não pode ter tipo `void`",
@@ -730,7 +919,7 @@ impl<'a> BodyChecker<'a> {
                     ));
                 }
                 let ty = expected.unwrap_or_else(|| initializer.ty.clone());
-                let initializer = self.into_owned(initializer, false);
+                let initializer = self.materialize_owned(initializer, false);
                 let id = self.fresh_binding_id();
                 self.declare(
                     &variable.name.name,
@@ -818,7 +1007,7 @@ impl<'a> BodyChecker<'a> {
                     }
                     (Some(expression), expected) => {
                         let value = self.check_expr(expression, expected)?;
-                        Some(self.into_owned(value, true))
+                        Some(self.materialize_owned(value, true))
                     }
                 };
                 Ok(HirStatement::Return(HirReturn {
@@ -915,7 +1104,7 @@ impl<'a> BodyChecker<'a> {
             ));
         }
         let value = self.check_expr(&assignment.value, &expected)?;
-        let value = self.into_owned(value, false);
+        let value = self.materialize_owned(value, false);
         Ok(HirStatement::Assignment(HirAssignment {
             target,
             value,
@@ -1061,6 +1250,32 @@ impl<'a> BodyChecker<'a> {
         expression: &Expression,
         expected: &ResolvedType,
     ) -> Result<HirExpr, SemaError> {
+        if matches!(expression.kind, ExpressionKind::NullLiteral) {
+            if matches!(expected, ResolvedType::Optional(_)) {
+                return Ok(self.expr(HirExprKind::OptionNone, expected.clone(), expression.span));
+            }
+            return Err(SemaError::new(
+                SemaErrorKind::TypeMismatch,
+                "`null` exige contexto de tipo opcional T?",
+                expression.span,
+            ));
+        }
+        if let ExpressionKind::Call(call) = &expression.kind {
+            if self.option_operation(call) == Some("some") {
+                if let ResolvedType::Optional(payload) = expected {
+                    return self.check_some(expression.span, call, Some(payload));
+                }
+            }
+        }
+        if let ExpressionKind::Binary(binary) = &expression.kind {
+            if binary.operator == BinaryOperator::Coalesce {
+                let actual = self.check_coalesce(expression.span, binary, Some(expected))?;
+                if &actual.ty != expected {
+                    return Err(type_mismatch(&actual.ty, expected, expression.span));
+                }
+                return Ok(actual);
+            }
+        }
         if let ExpressionKind::Grouping(inner) = &expression.kind {
             let inner = self.check_expr(inner, expected)?;
             return Ok(self.expr(
@@ -1086,6 +1301,20 @@ impl<'a> BodyChecker<'a> {
 
     fn synthesize_expr(&mut self, expression: &Expression) -> Result<HirExpr, SemaError> {
         match &expression.kind {
+            ExpressionKind::Closure(closure) => self.check_closure(closure, expression.span),
+            ExpressionKind::Template(parts) => {
+                let mut result = self.expr(HirExprKind::StringLiteral(String::new()), ResolvedType::String, expression.span);
+                for part in parts {
+                    let value = self.synthesize_expr(part)?;
+                    if !matches!(value.ty, ResolvedType::String | ResolvedType::Int | ResolvedType::Number | ResolvedType::Boolean) {
+                        return Err(SemaError::new(SemaErrorKind::UnsupportedType, "interpolação aceita somente string, int, number ou boolean", part.span));
+                    }
+                    let value = self.expr(HirExprKind::Call { function: "$template.stringify".into(), arguments: vec![HirCallArgument { span: part.span, expression: value, pass_mode: ArgPassMode::ByRef, clone_mode: None, defer_borrow_until_call: false, pre_evaluation_temp: None }] }, ResolvedType::String, part.span);
+                    result = self.expr(HirExprKind::Binary { left: Box::new(result), operator: BinaryOperator::Add, right: Box::new(value) }, ResolvedType::String, expression.span);
+                }
+                Ok(result)
+            }
+            ExpressionKind::NullLiteral => Err(SemaError::new(SemaErrorKind::UnsupportedType, "não é possível inferir T? para `null`; informe uma anotação ou contexto opcional", expression.span)),
             ExpressionKind::IntegerLiteral(value) => {
                 let value = i64::try_from(*value).map_err(|_| {
                     SemaError::new(
@@ -1180,9 +1409,19 @@ impl<'a> BodyChecker<'a> {
                     expression.span,
                 ))
             }
+            ExpressionKind::Binary(binary) if binary.operator == BinaryOperator::Coalesce => self.check_coalesce(expression.span, binary, None),
             ExpressionKind::Binary(binary) => {
-                let mut left = self.synthesize_expr(&binary.left)?;
-                let right = self.synthesize_expr(&binary.right)?;
+                let equality = matches!(binary.operator, BinaryOperator::Equal | BinaryOperator::NotEqual);
+                let (mut left, right) = if equality && is_null_expression(&binary.left) {
+                    let right = self.synthesize_expr(&binary.right)?;
+                    (self.check_expr(&binary.left, &right.ty)?, right)
+                } else {
+                    let left = self.synthesize_expr(&binary.left)?;
+                    let right = if equality && matches!(left.ty, ResolvedType::Optional(_)) {
+                        self.check_expr(&binary.right, &left.ty)?
+                    } else { self.synthesize_expr(&binary.right)? };
+                    (left, right)
+                };
                 let mut right_mut_roots = HashSet::new();
                 collect_nested_mut_borrow_roots(&right, &mut right_mut_roots);
                 if !left.ty.is_copy()
@@ -1343,7 +1582,7 @@ impl<'a> BodyChecker<'a> {
             let value = self.check_expr(&field.value, &declared.ty)?;
             fields.push(HirStructInitField {
                 name: declared.name.clone(),
-                value: self.into_owned(value, false),
+                value: self.materialize_owned(value, false),
                 span: field.span,
             });
         }
@@ -1378,7 +1617,7 @@ impl<'a> BodyChecker<'a> {
             ));
         }
         let element_type = first.ty.clone();
-        let mut elements = vec![self.into_owned(first, false)];
+        let mut elements = vec![self.materialize_owned(first, false)];
         for element in array.elements.iter().skip(1) {
             let value = match self.check_expr(element, &element_type) {
                 Ok(value) => value,
@@ -1391,7 +1630,7 @@ impl<'a> BodyChecker<'a> {
                 }
                 Err(error) => return Err(error),
             };
-            elements.push(self.into_owned(value, false));
+            elements.push(self.materialize_owned(value, false));
         }
         Ok(self.expr(
             HirExprKind::ArrayLiteral(elements),
@@ -1409,11 +1648,304 @@ impl<'a> BodyChecker<'a> {
         let mut elements = Vec::with_capacity(array.elements.len());
         for element in &array.elements {
             let value = self.check_expr(element, expected_element)?;
-            elements.push(self.into_owned(value, false));
+            elements.push(self.materialize_owned(value, false));
         }
         Ok(self.expr(
             HirExprKind::ArrayLiteral(elements),
             ResolvedType::Array(Box::new(expected_element.clone())),
+            span,
+        ))
+    }
+
+    fn option_operation<'expression>(
+        &self,
+        call: &'expression truxt_ast::CallExpression,
+    ) -> Option<&'expression str> {
+        let ExpressionKind::FieldAccess(access) = &call.callee.kind else {
+            return None;
+        };
+        if direct_callee_name(&access.object).as_deref() == Some("option")
+            && self.lookup("option").is_none()
+            && !self.functions.contains_key("option")
+            && !self.structures.contains_key("option")
+        {
+            Some(access.field.name.as_str())
+        } else {
+            None
+        }
+    }
+
+    fn check_some(
+        &mut self,
+        span: Span,
+        call: &truxt_ast::CallExpression,
+        expected_payload: Option<&ResolvedType>,
+    ) -> Result<HirExpr, SemaError> {
+        if call.arguments.len() != 1 {
+            return Err(SemaError::new(
+                SemaErrorKind::ArgumentCountMismatch,
+                "option.some espera exatamente um argumento",
+                span,
+            ));
+        }
+        let payload = if let Some(expected) = expected_payload {
+            self.check_expr(&call.arguments[0], expected)?
+        } else {
+            self.synthesize_expr(&call.arguments[0])?
+        };
+        if !payload.ty.is_value_type() || matches!(payload.ty, ResolvedType::Optional(_)) {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "option.some exige valor não void e não opcional",
+                payload.span,
+            ));
+        }
+        let ty = ResolvedType::Optional(Box::new(payload.ty.clone()));
+        let payload = self.materialize_owned(payload, false);
+        Ok(self.expr(HirExprKind::OptionSome(Box::new(payload)), ty, span))
+    }
+
+    fn check_coalesce(
+        &mut self,
+        span: Span,
+        binary: &truxt_ast::BinaryExpression,
+        expected: Option<&ResolvedType>,
+    ) -> Result<HirExpr, SemaError> {
+        let mut known_fallback = None;
+        let option = if is_null_expression(&binary.left) {
+            let context = if let Some(expected) = expected {
+                if matches!(expected, ResolvedType::Optional(_)) {
+                    expected.clone()
+                } else {
+                    ResolvedType::Optional(Box::new(expected.clone()))
+                }
+            } else {
+                let fallback = self.synthesize_expr(&binary.right)?;
+                let context = if matches!(fallback.ty, ResolvedType::Optional(_)) {
+                    fallback.ty.clone()
+                } else {
+                    ResolvedType::Optional(Box::new(fallback.ty.clone()))
+                };
+                known_fallback = Some(fallback);
+                context
+            };
+            if !context.is_value_type() {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnsupportedType,
+                    "não é possível inferir um opcional válido para ??",
+                    span,
+                ));
+            }
+            self.check_expr(&binary.left, &context)?
+        } else {
+            self.synthesize_expr(&binary.left)?
+        };
+        let ResolvedType::Optional(payload) = option.ty.clone() else {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "?? exige T? no lado esquerdo",
+                binary.left.span,
+            ));
+        };
+        let fallback = if let Some(fallback) = known_fallback {
+            fallback
+        } else if is_null_expression(&binary.right) || self.is_some_expression(&binary.right) {
+            self.check_expr(&binary.right, &option.ty)?
+        } else if is_contextual_aggregate(&binary.right) {
+            self.check_expr(&binary.right, &payload)?
+        } else {
+            self.synthesize_expr(&binary.right)?
+        };
+        let (mode, ty) = if fallback.ty == *payload {
+            (CoalesceMode::Value, *payload)
+        } else if fallback.ty == option.ty {
+            (CoalesceMode::Optional, option.ty.clone())
+        } else {
+            return Err(SemaError::new(
+                SemaErrorKind::TypeMismatch,
+                format!(
+                    "fallback de ?? deve ser `{}` ou `{}`, recebeu `{}`",
+                    payload, option.ty, fallback.ty
+                ),
+                fallback.span,
+            ));
+        };
+        let option = self.materialize_owned(option, false);
+        let fallback = self.materialize_owned(fallback, false);
+        Ok(self.expr(
+            HirExprKind::Coalesce {
+                option: Box::new(option),
+                fallback: Box::new(fallback),
+                mode,
+            },
+            ty,
+            span,
+        ))
+    }
+
+    fn is_some_expression(&self, expression: &Expression) -> bool {
+        match &expression.kind {
+            ExpressionKind::Grouping(inner) => self.is_some_expression(inner),
+            ExpressionKind::Call(call) => self.option_operation(call) == Some("some"),
+            _ => false,
+        }
+    }
+
+    fn check_closure(
+        &mut self,
+        closure: &truxt_ast::ClosureExpression,
+        span: Span,
+    ) -> Result<HirExpr, SemaError> {
+        let result = self.resolve_local_type(&closure.return_type, TypePosition::Return)?;
+        let mut names = closure_free_names(closure).into_iter().collect::<Vec<_>>();
+        names.sort();
+        let mut snapshots = Vec::new();
+        for name in names {
+            if let Some(binding) = self.lookup(&name).cloned() {
+                if matches!(binding.ty, ResolvedType::Closure(..)) {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedOwnershipPattern,
+                        "captura de outra closure não é suportada",
+                        span,
+                    ));
+                }
+                let source = self.expr(
+                    HirExprKind::Local {
+                        id: binding.id,
+                        name: name.clone(),
+                    },
+                    binding.ty.clone(),
+                    span,
+                );
+                snapshots.push((name, binding.ty, self.materialize_owned(source, false)));
+            }
+        }
+        let signature = FunctionInfo {
+            name: "$closure".into(),
+            parameters: closure
+                .parameters
+                .iter()
+                .map(|p| {
+                    Ok(ParameterInfo {
+                        name: p.name.name.clone(),
+                        ty: self.resolve_local_type(&p.ty, TypePosition::Parameter)?,
+                        span: p.span,
+                        pass_mode: ParameterPassMode::OwnedMove,
+                        mutated: false,
+                    })
+                })
+                .collect::<Result<Vec<_>, SemaError>>()?,
+            return_type: result.clone(),
+            has_explicit_return_type: true,
+            span,
+        };
+        let mut mutated = HashSet::new();
+        collect_forwarded_mut_parameters(&closure.body, &signature, self.functions, &mut mutated);
+        for p in &closure.parameters {
+            if block_mutates_name(&closure.body, &p.name.name) {
+                mutated.insert(p.name.name.clone());
+            }
+        }
+        let mut checker = BodyChecker::new(
+            self.structures,
+            self.functions,
+            self.next_binding_id,
+            self.mutable_bindings,
+            Some(FunctionContext {
+                return_type: result.clone(),
+                has_explicit_return_type: true,
+            }),
+        );
+        let mut captures = Vec::new();
+        for (name, ty, value) in snapshots {
+            let id = checker.fresh_binding_id();
+            checker.declare(
+                &name,
+                BindingInfo {
+                    id,
+                    ty,
+                    binding: Some(BindingKind::Const),
+                    parameter_mode: None,
+                    parameter_mutated: false,
+                    span,
+                },
+            )?;
+            captures.push((id, value));
+        }
+        let mut parameters = Vec::new();
+        for parameter in &closure.parameters {
+            let ty = checker.resolve_local_type(&parameter.ty, TypePosition::Parameter)?;
+            let id = checker.fresh_binding_id();
+            let pass_mode = if ty.is_copy() {
+                ParameterPassMode::ByValue
+            } else {
+                ParameterPassMode::OwnedMove
+            };
+            checker.declare_parameter(
+                &parameter.name.name,
+                BindingInfo {
+                    id,
+                    ty: ty.clone(),
+                    binding: None,
+                    parameter_mode: Some(pass_mode),
+                    parameter_mutated: mutated.contains(&parameter.name.name),
+                    span: parameter.span,
+                },
+            )?;
+            parameters.push(HirParameter {
+                id,
+                name: parameter.name.name.clone(),
+                ty,
+                pass_mode,
+                requires_mut_binding: false,
+                span: parameter.span,
+            });
+        }
+        let body = checker.check_block(&closure.body, false)?;
+        let mut wrapped = vec![HirDeclaration::Function(HirFunction {
+            name: String::new(),
+            parameters: Vec::new(),
+            return_type: result.clone(),
+            body,
+            span,
+        })];
+        apply_mutable_binding_flags(&mut wrapped, checker.mutable_bindings);
+        let HirDeclaration::Function(checked) = wrapped.pop().unwrap() else {
+            unreachable!()
+        };
+        let body = checked.body;
+        if result != ResolvedType::Void && !block_guarantees_return(&closure.body) {
+            return Err(SemaError::new(
+                SemaErrorKind::MissingReturnPath,
+                "closure deve retornar em todos os caminhos",
+                span,
+            ));
+        }
+        if captures
+            .iter()
+            .any(|(id, _)| checker.mutable_bindings.contains(id))
+        {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedOwnershipPattern,
+                "captures de closure são snapshots somente leitura",
+                span,
+            ));
+        }
+        for parameter in &mut parameters {
+            parameter.requires_mut_binding = mutated.contains(&parameter.name)
+                || checker.mutable_bindings.contains(&parameter.id);
+        }
+        let ty = ResolvedType::Closure(
+            parameters.iter().map(|p| p.ty.clone()).collect(),
+            Box::new(result),
+        );
+        Ok(self.expr(
+            HirExprKind::Closure {
+                captures,
+                parameters,
+                body,
+            },
+            ty,
             span,
         ))
     }
@@ -1423,6 +1955,87 @@ impl<'a> BodyChecker<'a> {
         span: Span,
         call: &truxt_ast::CallExpression,
     ) -> Result<HirExpr, SemaError> {
+        let closure_callee = match &call.callee.kind {
+            ExpressionKind::Closure(_) => Some(self.synthesize_expr(&call.callee)?),
+            ExpressionKind::Identifier(name)
+                if self
+                    .lookup(&name.name)
+                    .is_some_and(|b| matches!(b.ty, ResolvedType::Closure(..))) =>
+            {
+                Some(self.synthesize_expr(&call.callee)?)
+            }
+            ExpressionKind::Grouping(inner) if matches!(inner.kind, ExpressionKind::Closure(_)) => {
+                Some(self.synthesize_expr(inner)?)
+            }
+            _ => None,
+        };
+        if let Some(callee) = closure_callee {
+            let ResolvedType::Closure(parameters, result) = callee.ty.clone() else {
+                unreachable!()
+            };
+            if parameters.len() != call.arguments.len() {
+                return Err(SemaError::new(
+                    SemaErrorKind::ArgumentCountMismatch,
+                    "número incorreto de argumentos da closure",
+                    span,
+                ));
+            }
+            let mut arguments = Vec::new();
+            for (argument, ty) in call.arguments.iter().zip(parameters) {
+                let value = self.check_expr(argument, &ty)?;
+                arguments.push(self.materialize_owned(value, false));
+            }
+            return Ok(self.expr(
+                HirExprKind::ClosureCall {
+                    callee: Box::new(callee),
+                    arguments,
+                },
+                *result,
+                span,
+            ));
+        }
+        if let Some(operation) = self.option_operation(call) {
+            if operation == "some" {
+                return self.check_some(span, call, None);
+            }
+            if matches!(operation, "is_some" | "unwrap") {
+                if call.arguments.len() != 1 {
+                    return Err(SemaError::new(
+                        SemaErrorKind::ArgumentCountMismatch,
+                        "operações option esperam exatamente um argumento",
+                        span,
+                    ));
+                }
+                let expression = self.synthesize_expr(&call.arguments[0])?;
+                let ResolvedType::Optional(payload) = expression.ty.clone() else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "operações option exigem um valor T?",
+                        expression.span,
+                    ));
+                };
+                let (function, ty) = if operation == "is_some" {
+                    (OPTION_IS_SOME_BUILTIN, ResolvedType::Boolean)
+                } else {
+                    (OPTION_UNWRAP_BUILTIN, *payload)
+                };
+                return Ok(self.expr(
+                    HirExprKind::Call {
+                        function: function.to_owned(),
+                        arguments: vec![HirCallArgument {
+                            span: expression.span,
+                            expression,
+                            pass_mode: ArgPassMode::ByRef,
+                            clone_mode: None,
+                            defer_borrow_until_call: false,
+                            pre_evaluation_temp: None,
+                        }],
+                    },
+                    ty,
+                    span,
+                ));
+            }
+        }
         if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
             if direct_callee_name(&access.object).as_deref() == Some("result")
                 && matches!(
@@ -1512,6 +2125,29 @@ impl<'a> BodyChecker<'a> {
                     ResolvedType::Void,
                     span,
                 ));
+            }
+        }
+        if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
+            let receiver = self.synthesize_expr(&access.object)?;
+            if let ResolvedType::Struct(target) = receiver.ty {
+                let name = method_name(&target, &access.field.name);
+                let mut arguments = vec![(*access.object).clone()];
+                arguments.extend(call.arguments.clone());
+                let callee = Expression {
+                    kind: ExpressionKind::Identifier(Identifier {
+                        name,
+                        span: access.field.span,
+                    }),
+                    span: call.callee.span,
+                };
+                return self.check_call(
+                    span,
+                    &truxt_ast::CallExpression {
+                        callee: Box::new(callee),
+                        arguments,
+                        span,
+                    },
+                );
             }
         }
         let callee = direct_callee_name(&call.callee).ok_or_else(|| {
@@ -1628,15 +2264,15 @@ impl<'a> BodyChecker<'a> {
                 roots
             })
             .collect::<Vec<_>>();
-        for index in 0..arguments.len() {
+        for (index, argument) in arguments.iter_mut().enumerate() {
             if !matches!(
-                arguments[index].pass_mode,
+                argument.pass_mode,
                 ArgPassMode::ByRef | ArgPassMode::ByMutRef
             ) {
                 continue;
             }
             let mut expression_roots = HashSet::new();
-            collect_hir_binding_uses(&arguments[index].expression, &mut expression_roots);
+            collect_hir_binding_uses(&argument.expression, &mut expression_roots);
             let nested_sibling_mutates_place =
                 nested_mut_roots
                     .iter()
@@ -1648,17 +2284,16 @@ impl<'a> BodyChecker<'a> {
             if !nested_sibling_mutates_place {
                 continue;
             }
-            if is_direct_binding_place(&arguments[index].expression) {
-                arguments[index].defer_borrow_until_call = true;
-            } else if arguments[index].pass_mode == ArgPassMode::ByRef {
-                arguments[index].expression =
-                    self.clone_owned_expression(arguments[index].expression.clone());
-                arguments[index].pre_evaluation_temp = Some(CallTempId(0));
+            if is_direct_binding_place(&argument.expression) {
+                argument.defer_borrow_until_call = true;
+            } else if argument.pass_mode == ArgPassMode::ByRef {
+                argument.expression = self.clone_owned_expression(argument.expression.clone());
+                argument.pre_evaluation_temp = Some(CallTempId(0));
             } else {
                 return Err(SemaError::new(
                     SemaErrorKind::UnsupportedOwnershipPattern,
                     "não é seguro adiar um empréstimo mutável de campo/índice sobreposto por outra chamada",
-                    arguments[index].span,
+                    argument.span,
                 ));
             }
         }
@@ -1780,7 +2415,7 @@ impl<'a> BodyChecker<'a> {
         Ok(())
     }
 
-    fn into_owned(&self, expression: HirExpr, returning: bool) -> HirExpr {
+    fn materialize_owned(&self, expression: HirExpr, returning: bool) -> HirExpr {
         if expression.ty.is_copy() || !is_place(&expression) {
             return expression;
         }
@@ -1881,12 +2516,16 @@ fn resolve_type(
             let error = resolve_type(error, known_structs, TypePosition::Field)?;
             ResolvedType::Result(Box::new(ok), Box::new(error))
         }
-        TypeExpressionKind::Optional(_) => {
-            return Err(SemaError::new(
-                SemaErrorKind::UnsupportedType,
-                "tipos opcionais pertencem à Fase 4",
-                expression.span,
-            ));
+        TypeExpressionKind::Optional(payload) => {
+            let payload = resolve_type(payload, known_structs, TypePosition::Field)?;
+            if matches!(payload, ResolvedType::Optional(_) | ResolvedType::Void) {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnsupportedType,
+                    "opcional aninhado ou void? não é suportado",
+                    expression.span,
+                ));
+            }
+            ResolvedType::Optional(Box::new(payload))
         }
     };
 
@@ -1912,6 +2551,22 @@ fn type_mismatch(actual: &ResolvedType, expected: &ResolvedType, span: Span) -> 
         format!("tipo incompatível: esperado `{expected}`, recebido `{actual}`"),
         span,
     )
+}
+
+fn is_null_expression(expression: &Expression) -> bool {
+    match &expression.kind {
+        ExpressionKind::NullLiteral => true,
+        ExpressionKind::Grouping(inner) => is_null_expression(inner),
+        _ => false,
+    }
+}
+
+fn is_contextual_aggregate(expression: &Expression) -> bool {
+    match &expression.kind {
+        ExpressionKind::ObjectLiteral(_) | ExpressionKind::ArrayLiteral(_) => true,
+        ExpressionKind::Grouping(inner) => is_contextual_aggregate(inner),
+        _ => false,
+    }
 }
 
 fn binary_result_type(
@@ -2023,6 +2678,26 @@ fn place_projection_conflicts(expression: &HirExpr, root: BindingId) -> bool {
 
 fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<BindingId>) {
     match &expression.kind {
+        HirExprKind::Closure { captures, .. } => {
+            for (_, value) in captures {
+                collect_nested_mut_borrow_roots(value, roots);
+            }
+        }
+        HirExprKind::ClosureCall { callee, arguments } => {
+            collect_nested_mut_borrow_roots(callee, roots);
+            for value in arguments {
+                collect_nested_mut_borrow_roots(value, roots);
+            }
+        }
+
+        HirExprKind::OptionNone => {}
+        HirExprKind::OptionSome(payload) => collect_nested_mut_borrow_roots(payload, roots),
+        HirExprKind::Coalesce {
+            option, fallback, ..
+        } => {
+            collect_nested_mut_borrow_roots(option, roots);
+            collect_nested_mut_borrow_roots(fallback, roots);
+        }
         HirExprKind::Call { arguments, .. } => {
             for argument in arguments {
                 if argument.pass_mode == ArgPassMode::ByMutRef {
@@ -2043,9 +2718,9 @@ fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<Bin
                 collect_nested_mut_borrow_roots(element, roots);
             }
         }
-        HirExprKind::Unary { operand, .. } | HirExprKind::Grouping(operand) => {
-            collect_nested_mut_borrow_roots(operand, roots)
-        }
+        HirExprKind::Unary { operand, .. }
+        | HirExprKind::Grouping(operand)
+        | HirExprKind::Move(operand) => collect_nested_mut_borrow_roots(operand, roots),
         HirExprKind::Clone {
             expression: operand,
             ..
@@ -2069,14 +2744,23 @@ fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<Bin
 
 fn hir_contains_call(expression: &HirExpr) -> bool {
     match &expression.kind {
+        HirExprKind::Closure { captures, .. } => {
+            captures.iter().any(|(_, value)| hir_contains_call(value))
+        }
+        HirExprKind::ClosureCall { .. } => true,
+        HirExprKind::OptionNone => false,
+        HirExprKind::OptionSome(payload) => hir_contains_call(payload),
+        HirExprKind::Coalesce {
+            option, fallback, ..
+        } => hir_contains_call(option) || hir_contains_call(fallback),
         HirExprKind::Call { .. } => true,
         HirExprKind::StructLiteral { fields, .. } => {
             fields.iter().any(|field| hir_contains_call(&field.value))
         }
         HirExprKind::ArrayLiteral(elements) => elements.iter().any(hir_contains_call),
-        HirExprKind::Unary { operand, .. } | HirExprKind::Grouping(operand) => {
-            hir_contains_call(operand)
-        }
+        HirExprKind::Unary { operand, .. }
+        | HirExprKind::Grouping(operand)
+        | HirExprKind::Move(operand) => hir_contains_call(operand),
         HirExprKind::Clone {
             expression: operand,
             ..
@@ -2098,6 +2782,26 @@ fn hir_contains_call(expression: &HirExpr) -> bool {
 
 fn collect_hir_binding_uses(expression: &HirExpr, uses: &mut HashSet<BindingId>) {
     match &expression.kind {
+        HirExprKind::Closure { captures, .. } => {
+            for (_, value) in captures {
+                collect_hir_binding_uses(value, uses);
+            }
+        }
+        HirExprKind::ClosureCall { callee, arguments } => {
+            collect_hir_binding_uses(callee, uses);
+            for value in arguments {
+                collect_hir_binding_uses(value, uses);
+            }
+        }
+
+        HirExprKind::OptionNone => {}
+        HirExprKind::OptionSome(payload) => collect_hir_binding_uses(payload, uses),
+        HirExprKind::Coalesce {
+            option, fallback, ..
+        } => {
+            collect_hir_binding_uses(option, uses);
+            collect_hir_binding_uses(fallback, uses);
+        }
         HirExprKind::Local { id, .. } => {
             uses.insert(*id);
         }
@@ -2111,9 +2815,9 @@ fn collect_hir_binding_uses(expression: &HirExpr, uses: &mut HashSet<BindingId>)
                 collect_hir_binding_uses(element, uses);
             }
         }
-        HirExprKind::Unary { operand, .. } | HirExprKind::Grouping(operand) => {
-            collect_hir_binding_uses(operand, uses)
-        }
+        HirExprKind::Unary { operand, .. }
+        | HirExprKind::Grouping(operand)
+        | HirExprKind::Move(operand) => collect_hir_binding_uses(operand, uses),
         HirExprKind::Clone { expression, .. } => collect_hir_binding_uses(expression, uses),
         HirExprKind::Binary { left, right, .. } => {
             collect_hir_binding_uses(left, uses);
@@ -2200,6 +2904,7 @@ fn if_returns_name(statement: &truxt_ast::IfStatement, name: &str) -> bool {
 
 fn expression_contains_owned_name(expression: &Expression, name: &str) -> bool {
     match &expression.kind {
+        ExpressionKind::Closure(_) | ExpressionKind::Template(_) => false,
         ExpressionKind::Identifier(identifier) => identifier.name == name,
         ExpressionKind::ObjectLiteral(object) => object
             .fields
@@ -2221,7 +2926,8 @@ fn expression_contains_owned_name(expression: &Expression, name: &str) -> bool {
         ExpressionKind::IntegerLiteral(_)
         | ExpressionKind::NumberLiteral(_)
         | ExpressionKind::StringLiteral(_)
-        | ExpressionKind::BooleanLiteral(_) => false,
+        | ExpressionKind::BooleanLiteral(_)
+        | ExpressionKind::NullLiteral => false,
     }
 }
 
@@ -2296,7 +3002,48 @@ fn collect_forwarded_mut_expr(
     needs_mut: &mut HashSet<String>,
 ) {
     match &expression.kind {
+        ExpressionKind::Closure(_) => {}
+        ExpressionKind::Template(parts) => {
+            for part in parts {
+                collect_forwarded_mut_expr(part, caller, functions, needs_mut);
+            }
+        }
         ExpressionKind::Call(call) => {
+            if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
+                // Conservatively union same-named method summaries for projections.
+                let suffix = format!(":{}", access.field.name);
+                let exact = direct_callee_name(&access.object)
+                    .and_then(|name| caller.parameters.iter().find(|p| p.name == name))
+                    .and_then(|p| {
+                        if let ResolvedType::Struct(target) = &p.ty {
+                            Some(method_name(target, &access.field.name))
+                        } else {
+                            None
+                        }
+                    });
+                for method in functions.values().filter(|f| {
+                    exact.as_ref().map_or_else(
+                        || f.name.starts_with("$method:") && f.name.ends_with(&suffix),
+                        |name| &f.name == name,
+                    )
+                }) {
+                    let arguments =
+                        std::iter::once(access.object.as_ref()).chain(call.arguments.iter());
+                    for (argument, parameter) in arguments.zip(&method.parameters) {
+                        if parameter.pass_mode == ParameterPassMode::BorrowMut {
+                            if let Some(root) = root_name(argument) {
+                                if caller
+                                    .parameters
+                                    .iter()
+                                    .any(|p| p.name == root && !p.ty.is_copy())
+                                {
+                                    needs_mut.insert(root.to_owned());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(callee_name) = direct_callee_name(&call.callee) {
                 if let Some(callee) = functions.get(&callee_name) {
                     for (argument, parameter) in call.arguments.iter().zip(&callee.parameters) {
@@ -2351,7 +3098,8 @@ fn collect_forwarded_mut_expr(
         | ExpressionKind::NumberLiteral(_)
         | ExpressionKind::StringLiteral(_)
         | ExpressionKind::BooleanLiteral(_)
-        | ExpressionKind::Identifier(_) => {}
+        | ExpressionKind::Identifier(_)
+        | ExpressionKind::NullLiteral => {}
     }
 }
 
@@ -2422,6 +3170,7 @@ fn direct_struct_dependencies<'a>(ty: &'a ResolvedType, children: &mut Vec<&'a s
             direct_struct_dependencies(ok, children);
             direct_struct_dependencies(error, children);
         }
+        ResolvedType::Optional(payload) => direct_struct_dependencies(payload, children),
         _ => {}
     }
 }

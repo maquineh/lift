@@ -2,6 +2,7 @@
 name = "truxt_core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Biblioteca base Rust do Truxt: Console, arrays e strings"
 
 [dependencies]

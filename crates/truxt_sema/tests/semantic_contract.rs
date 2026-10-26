@@ -17,6 +17,14 @@ fn analyze_source(source: &str) -> Result<truxt_sema::HirProgram, Vec<truxt_sema
 }
 
 #[test]
+fn unresolved_source_imports_are_rejected_before_hir() {
+    let errors = analyze_source("import module \"module.truxt\";").unwrap_err();
+    assert!(errors
+        .iter()
+        .any(|error| error.kind == SemaErrorKind::InvalidImport));
+}
+
+#[test]
 fn result_values_have_typed_borrowed_inspection_and_owned_payloads() {
     let hir = analyze_source(
         r#"

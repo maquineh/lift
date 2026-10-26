@@ -9,7 +9,7 @@
 
 mod span;
 
-pub use span::Span;
+pub use span::{SourceId, Span};
 
 /// Programa fonte após parsing.
 #[derive(Clone, Debug, PartialEq)]
@@ -28,21 +28,40 @@ impl ProgramAst {
 /// cada nó concreto contém o seu.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
+    Impl(ImplDeclaration),
     Interface(InterfaceDeclaration),
     Function(FunctionDeclaration),
     Import(ImportFunctionDeclaration),
+    ModuleImport(ModuleImportDeclaration),
     Statement(Statement),
 }
 
 impl Declaration {
     pub fn span(&self) -> Span {
         match self {
+            Self::Impl(node) => node.span,
             Self::Interface(node) => node.span,
             Self::Function(node) => node.span,
             Self::Import(node) => node.span,
+            Self::ModuleImport(node) => node.span,
             Self::Statement(node) => node.span(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImplDeclaration {
+    pub target: Identifier,
+    pub methods: Vec<FunctionDeclaration>,
+    pub span: Span,
+}
+
+/// Relative source import; PT-BR: import de fonte relativo, resolvido pela CLI.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModuleImportDeclaration {
+    pub path: String,
+    pub path_span: Span,
+    pub span: Span,
 }
 
 /// Assinatura explícita de uma função Rust externa; o destino ainda é texto fonte.
@@ -205,6 +224,8 @@ pub struct Expression {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExpressionKind {
+    Closure(ClosureExpression),
+    Template(Vec<Expression>),
     /// Magnitude não negativa. A semântica valida o intervalo `i64`, levando
     /// em conta um operador unário de negação que possa precedê-la.
     IntegerLiteral(u64),
@@ -212,6 +233,7 @@ pub enum ExpressionKind {
     /// Conteúdo da string sem aspas; escapes continuam no formato-fonte.
     StringLiteral(String),
     BooleanLiteral(bool),
+    NullLiteral,
     Identifier(Identifier),
     ObjectLiteral(ObjectLiteral),
     ArrayLiteral(ArrayLiteral),
@@ -221,6 +243,14 @@ pub enum ExpressionKind {
     Call(CallExpression),
     Index(IndexExpression),
     Grouping(Box<Expression>),
+}
+
+/// Explicitly typed arrow; PT-BR: arrow com assinatura explícita.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosureExpression {
+    pub parameters: Vec<Parameter>,
+    pub return_type: TypeExpression,
+    pub body: Block,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -265,6 +295,7 @@ pub struct BinaryExpression {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryOperator {
+    Coalesce,
     Add,
     Subtract,
     Multiply,

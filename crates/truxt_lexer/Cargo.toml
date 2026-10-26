@@ -2,6 +2,7 @@
 name = "truxt_lexer"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Lexer do Truxt, com tokens e spans de origem"
 
 [dependencies]

@@ -1,0 +1,69 @@
+// EN: Counter effects demonstrate exactly-once LHS and lazy None-only fallback.
+// PT-BR: Efeitos no contador provam LHS única e fallback apenas para None.
+interface Counter { calls: int }
+interface Person { name: string? }
+
+function produce(counter: Counter, present: boolean): int? {
+    counter.calls = counter.calls + 1;
+    if present { return option.some(7); }
+    return null;
+}
+
+function fallback(counter: Counter): int {
+    counter.calls = counter.calls + 10;
+    return 9;
+}
+
+function next(counter: Counter, value: int?): int? {
+    counter.calls = counter.calls + 100;
+    return value;
+}
+
+function boolean_fallback(counter: Counter): boolean {
+    counter.calls = counter.calls + 1000;
+    return true;
+}
+
+function string_fallback(counter: Counter): string {
+    counter.calls = counter.calls + 1000;
+    return "unexpected";
+}
+
+function resolve(value: string?): string { return value ?? "missing"; }
+
+const counter: Counter = { calls: 0 };
+console.log(produce(counter, true) ?? fallback(counter));
+console.log(counter.calls);
+console.log(produce(counter, false) ?? fallback(counter));
+console.log(counter.calls);
+
+const absent: int? = null;
+const present: int? = option.some(5);
+console.log(absent ?? next(counter, present) ?? fallback(counter));
+console.log(counter.calls);
+const selected = present ?? next(counter, absent);
+console.log(option.is_some(selected));
+console.log(selected ?? 0);
+console.log(counter.calls);
+console.log(option.some(false) ?? boolean_fallback(counter));
+console.log(option.some(0) ?? fallback(counter));
+console.log(option.some("") ?? string_fallback(counter));
+console.log(counter.calls);
+console.log(option.is_some(absent));
+
+const text: string? = option.some("keep");
+console.log(option.unwrap(text));
+console.log(text ?? "bad");
+console.log(resolve(text));
+console.log(resolve(null));
+const items: int?[] = [null, option.some(2)];
+console.log(items[0] ?? 1);
+console.log(items[1] ?? 1);
+const optional_array: int[]? = option.some([3, 4]);
+const values = optional_array ?? [];
+console.log(values[0]);
+const person: Person = { name: null };
+console.log(person.name ?? "unknown");
+console.log(null ?? 42);
+console.log(absent == null);
+console.log(null != present);

@@ -6,9 +6,10 @@ use truxt_ast::{
     ArrayLiteral, AssignmentStatement, BinaryExpression, BinaryOperator, BindingKind, Block,
     CallExpression, Declaration, ElseBranch, ElseBranchKind, Expression, ExpressionKind,
     ExpressionStatement, FieldAccessExpression, FunctionDeclaration, Identifier, IfStatement,
-    ImportFunctionDeclaration, IndexExpression, InterfaceDeclaration, InterfaceField, ObjectField,
-    ObjectLiteral, Parameter, ProgramAst, ReturnStatement, Span, Statement, TypeExpression,
-    TypeExpressionKind, UnaryExpression, UnaryOperator, VariableDeclaration, WhileStatement,
+    ImportFunctionDeclaration, IndexExpression, InterfaceDeclaration, InterfaceField,
+    ModuleImportDeclaration, ObjectField, ObjectLiteral, Parameter, ProgramAst, ReturnStatement,
+    SourceId, Span, Statement, TypeExpression, TypeExpressionKind, UnaryExpression, UnaryOperator,
+    VariableDeclaration, WhileStatement,
 };
 use truxt_lexer::Token;
 
@@ -22,6 +23,7 @@ pub(super) struct Parser<'tokens> {
     cursor: usize,
     delimiters: Vec<Delimiter>,
     errors: Vec<ParseError>,
+    source: SourceId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,11 +35,19 @@ enum Delimiter {
 
 impl<'tokens> Parser<'tokens> {
     pub(super) fn new(tokens: &'tokens [(Token, Span)]) -> Self {
+        Self::new_with_source(
+            tokens,
+            tokens.first().map_or(SourceId(0), |(_, span)| span.source),
+        )
+    }
+
+    pub(super) fn new_with_source(tokens: &'tokens [(Token, Span)], source: SourceId) -> Self {
         Self {
             tokens,
             cursor: 0,
             delimiters: Vec::new(),
             errors: Vec::new(),
+            source,
         }
     }
 
@@ -60,8 +70,8 @@ impl<'tokens> Parser<'tokens> {
         }
 
         let span = match (self.tokens.first(), self.tokens.last()) {
-            (Some((_, first)), Some((_, last))) => Span::new(first.start, last.end),
-            _ => Span::default(),
+            (Some((_, first)), Some((_, last))) => self.span(first.start, last.end),
+            _ => self.span(0, 0),
         };
         let program = ProgramAst::new(declarations, span);
 
@@ -74,6 +84,25 @@ impl<'tokens> Parser<'tokens> {
 
     fn parse_declaration(&mut self) -> Result<Declaration, ParseError> {
         match self.current() {
+            Some(Token::Impl) => {
+                let start = self.current_span().start;
+                self.advance();
+                let target = self.parse_identifier()?;
+                self.expect(is_left_brace, "`{`")?;
+                let mut methods = Vec::new();
+                while !self.check(is_right_brace) && !self.is_at_end() {
+                    methods.push(self.parse_function_declaration()?);
+                }
+                let end = self.expect(is_right_brace, "`}`")?.end;
+                Ok(Declaration::Impl(truxt_ast::ImplDeclaration {
+                    target,
+                    methods,
+                    span: self.span(start, end),
+                }))
+            }
+            Some(Token::Import) if self.check_n(1, is_module) => {
+                self.parse_module_import().map(Declaration::ModuleImport)
+            }
             Some(Token::Import) => self.parse_import().map(Declaration::Import),
             Some(Token::Interface) => self
                 .parse_interface_declaration()
@@ -81,6 +110,25 @@ impl<'tokens> Parser<'tokens> {
             Some(Token::Function) => self.parse_function_declaration().map(Declaration::Function),
             _ => self.parse_statement().map(Declaration::Statement),
         }
+    }
+
+    fn parse_module_import(&mut self) -> Result<ModuleImportDeclaration, ParseError> {
+        let start = self
+            .expect(|token| matches!(token, Token::Import), "`import`")?
+            .start;
+        self.expect(is_module, "`module`")?;
+        let path_span = self.current_span();
+        let path = match self.current() {
+            Some(Token::StringLiteral(path)) => path.clone(),
+            _ => return Err(self.error("caminho do módulo entre aspas")),
+        };
+        self.advance();
+        let end = self.expect(is_semicolon, "`;`")?.end;
+        Ok(ModuleImportDeclaration {
+            path,
+            path_span,
+            span: self.span(start, end),
+        })
     }
 
     fn parse_interface_declaration(&mut self) -> Result<InterfaceDeclaration, ParseError> {
@@ -94,7 +142,7 @@ impl<'tokens> Parser<'tokens> {
             let field_name = self.parse_identifier()?;
             self.expect(is_colon, "`:`")?;
             let ty = self.parse_type()?;
-            let field_span = Span::new(field_start, ty.span.end);
+            let field_span = self.span(field_start, ty.span.end);
             fields.push(InterfaceField {
                 name: field_name,
                 ty,
@@ -117,7 +165,7 @@ impl<'tokens> Parser<'tokens> {
         Ok(InterfaceDeclaration {
             name,
             fields,
-            span: Span::new(start, close.end),
+            span: self.span(start, close.end),
         })
     }
 
@@ -154,12 +202,13 @@ impl<'tokens> Parser<'tokens> {
             return_type,
             source,
             source_span,
-            span: Span::new(start, end),
+            span: self.span(start, end),
         })
     }
 
     fn parse_function_declaration(&mut self) -> Result<FunctionDeclaration, ParseError> {
-        let start = self.expect(is_function, "`function`")?.start;
+        let start = self.current_span().start;
+        self.consume(is_function);
         let name = self.parse_identifier()?;
         self.expect(is_left_paren, "`(`")?;
         let mut parameters = Vec::new();
@@ -188,7 +237,7 @@ impl<'tokens> Parser<'tokens> {
             name,
             parameters,
             return_type,
-            span: Span::new(start, body.span.end),
+            span: self.span(start, body.span.end),
             body,
         })
     }
@@ -200,7 +249,7 @@ impl<'tokens> Parser<'tokens> {
         let ty = self.parse_type()?;
         Ok(Parameter {
             name,
-            span: Span::new(start, ty.span.end),
+            span: self.span(start, ty.span.end),
             ty,
         })
     }
@@ -208,17 +257,22 @@ impl<'tokens> Parser<'tokens> {
     fn parse_type(&mut self) -> Result<TypeExpression, ParseError> {
         let mut ty = self.parse_named_type()?;
 
-        // `T[]` faz parte da fase de arrays; `T?` fica para a fase de opcionais.
         loop {
-            if !self.check(is_left_bracket) || !self.check_n(1, is_right_bracket) {
+            if self.check(is_left_bracket) && self.check_n(1, is_right_bracket) {
+                self.advance();
+                let close = self.expect(is_right_bracket, "`]`")?;
+                ty = TypeExpression {
+                    span: self.span(ty.span.start, close.end),
+                    kind: TypeExpressionKind::Array(Box::new(ty)),
+                };
+            } else if let Some(question) = self.consume(|token| matches!(token, Token::Question)) {
+                ty = TypeExpression {
+                    span: self.span(ty.span.start, question.end),
+                    kind: TypeExpressionKind::Optional(Box::new(ty)),
+                };
+            } else {
                 break;
             }
-            self.advance();
-            let close = self.expect(is_right_bracket, "`]`")?;
-            ty = TypeExpression {
-                span: Span::new(ty.span.start, close.end),
-                kind: TypeExpressionKind::Array(Box::new(ty)),
-            };
         }
 
         Ok(ty)
@@ -244,7 +298,7 @@ impl<'tokens> Parser<'tokens> {
             let close = self.expect(|token| matches!(token, Token::Greater), "`>`")?;
             return Ok(TypeExpression {
                 kind: TypeExpressionKind::Result(Box::new(ok), Box::new(error)),
-                span: Span::new(span.start, close.end),
+                span: self.span(span.start, close.end),
             });
         }
 
@@ -278,7 +332,7 @@ impl<'tokens> Parser<'tokens> {
         let close = self.expect(is_right_brace, "`}`")?;
         Ok(Block {
             statements,
-            span: Span::new(start, close.end),
+            span: self.span(start, close.end),
         })
     }
 
@@ -324,7 +378,7 @@ impl<'tokens> Parser<'tokens> {
             name,
             annotation,
             initializer,
-            span: Span::new(start, end),
+            span: self.span(start, end),
         }))
     }
 
@@ -336,13 +390,13 @@ impl<'tokens> Parser<'tokens> {
             if self.check(is_if) {
                 let nested = self.parse_if_statement()?;
                 Some(ElseBranch {
-                    span: Span::new(else_span.start, nested.span.end),
+                    span: self.span(else_span.start, nested.span.end),
                     kind: ElseBranchKind::ElseIf(Box::new(nested)),
                 })
             } else {
                 let block = self.parse_block()?;
                 Some(ElseBranch {
-                    span: Span::new(else_span.start, block.span.end),
+                    span: self.span(else_span.start, block.span.end),
                     kind: ElseBranchKind::Block(block),
                 })
             }
@@ -357,7 +411,7 @@ impl<'tokens> Parser<'tokens> {
             condition,
             then_branch,
             else_branch,
-            span: Span::new(start, end),
+            span: self.span(start, end),
         })
     }
 
@@ -367,7 +421,7 @@ impl<'tokens> Parser<'tokens> {
         let body = self.parse_block()?;
         Ok(WhileStatement {
             condition,
-            span: Span::new(start, body.span.end),
+            span: self.span(start, body.span.end),
             body,
         })
     }
@@ -387,7 +441,7 @@ impl<'tokens> Parser<'tokens> {
 
         Ok(ReturnStatement {
             value,
-            span: Span::new(start_span.start, end),
+            span: self.span(start_span.start, end),
         })
     }
 
@@ -399,7 +453,7 @@ impl<'tokens> Parser<'tokens> {
                 .consume(is_semicolon)
                 .map_or(value.span.end, |span| span.end);
             return Ok(Statement::Assignment(AssignmentStatement {
-                span: Span::new(left.span.start, end),
+                span: self.span(left.span.start, end),
                 target: left,
                 value,
             }));
@@ -409,7 +463,7 @@ impl<'tokens> Parser<'tokens> {
             .consume(is_semicolon)
             .map_or(left.span.end, |span| span.end);
         Ok(Statement::Expression(ExpressionStatement {
-            span: Span::new(left.span.start, end),
+            span: self.span(left.span.start, end),
             expression: left,
         }))
     }
@@ -433,9 +487,23 @@ impl<'tokens> Parser<'tokens> {
                 break;
             }
 
+            let operator_span = self.current_span();
             self.advance();
             let right = self.parse_expression(right_power)?;
-            let span = Span::new(left.span.start, right.span.end);
+            if (operator == BinaryOperator::Coalesce
+                && (has_ungrouped_operator(&left, &[BinaryOperator::And, BinaryOperator::Or])
+                    || has_ungrouped_operator(&right, &[BinaryOperator::And, BinaryOperator::Or])))
+                || (matches!(operator, BinaryOperator::And | BinaryOperator::Or)
+                    && (has_ungrouped_operator(&left, &[BinaryOperator::Coalesce])
+                        || has_ungrouped_operator(&right, &[BinaryOperator::Coalesce])))
+            {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnexpectedToken,
+                    "parênteses ao misturar `??` com `&&`/`||`",
+                    operator_span,
+                ));
+            }
+            let span = self.span(left.span.start, right.span.end);
             let binary = BinaryExpression {
                 left: Box::new(left),
                 operator,
@@ -462,7 +530,7 @@ impl<'tokens> Parser<'tokens> {
             let start = self.current_span().start;
             self.advance();
             let operand = self.parse_expression(PREFIX_BINDING_POWER)?;
-            let span = Span::new(start, operand.span.end);
+            let span = self.span(start, operand.span.end);
             let unary = UnaryExpression {
                 operator,
                 operand: Box::new(operand),
@@ -478,6 +546,71 @@ impl<'tokens> Parser<'tokens> {
     }
 
     fn parse_primary(&mut self) -> Result<Expression, ParseError> {
+        if self.check(is_left_paren) && self.arrow_ahead() {
+            let start = self.expect(is_left_paren, "`(`")?.start;
+            let mut parameters = Vec::new();
+            while !self.check(is_right_paren) {
+                parameters.push(self.parse_parameter()?);
+                if self.consume(is_comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(is_right_paren, "`)`")?;
+            self.expect(is_colon, "tipo explícito da arrow após `:`")?;
+            let return_type = self.parse_type()?;
+            self.expect(|t| matches!(t, Token::Arrow), "`=>`")?;
+            let body = if self.check(is_left_brace) {
+                self.parse_block()?
+            } else {
+                let value = self.parse_expression(0)?;
+                let span = value.span;
+                Block {
+                    statements: vec![Statement::Return(ReturnStatement {
+                        value: Some(value),
+                        span,
+                    })],
+                    span,
+                }
+            };
+            let span = self.span(start, body.span.end);
+            return Ok(Expression {
+                kind: ExpressionKind::Closure(truxt_ast::ClosureExpression {
+                    parameters,
+                    return_type,
+                    body,
+                }),
+                span,
+            });
+        }
+        if let Some(Token::TemplateLiteral(parts)) = self.current().cloned() {
+            let span = self.current_span();
+            self.advance();
+            let mut values = Vec::new();
+            for part in parts {
+                values.push(match part {
+                    truxt_lexer::TemplatePart::Text(text) => Expression {
+                        kind: ExpressionKind::StringLiteral(text),
+                        span,
+                    },
+                    truxt_lexer::TemplatePart::Expression(tokens) => {
+                        let tokens = tokens
+                            .into_iter()
+                            .map(|(token, span)| (token, span.with_source(self.source)))
+                            .collect::<Vec<_>>();
+                        let mut parser = Parser::new_with_source(&tokens, self.source);
+                        let expression = parser.parse_expression(0)?;
+                        if !parser.is_at_end() {
+                            return Err(parser.error("fim da interpolação"));
+                        }
+                        expression
+                    }
+                });
+            }
+            return Ok(Expression {
+                kind: ExpressionKind::Template(values),
+                span,
+            });
+        }
         let span = self.current_span();
         let token = self.current().cloned();
 
@@ -510,6 +643,13 @@ impl<'tokens> Parser<'tokens> {
                     span,
                 })
             }
+            Some(Token::Null) => {
+                self.advance();
+                Ok(Expression {
+                    kind: ExpressionKind::NullLiteral,
+                    span,
+                })
+            }
             Some(Token::Identifier(name)) => {
                 self.advance();
                 let identifier = Identifier { name, span };
@@ -525,13 +665,33 @@ impl<'tokens> Parser<'tokens> {
         }
     }
 
+    fn arrow_ahead(&self) -> bool {
+        let mut depth = 0;
+        for (index, (token, _)) in self.tokens[self.cursor..].iter().enumerate() {
+            match token {
+                Token::LeftParen => depth += 1,
+                Token::RightParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(self.cursor + index + 1),
+                            Some((Token::Colon, _))
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn parse_grouping_expression(&mut self) -> Result<Expression, ParseError> {
         let open = self.expect(is_left_paren, "`(`")?;
         let inner = self.parse_expression(0)?;
         let close = self.expect(is_right_paren, "`)`")?;
         Ok(Expression {
             kind: ExpressionKind::Grouping(Box::new(inner)),
-            span: Span::new(open.start, close.end),
+            span: self.span(open.start, close.end),
         })
     }
 
@@ -545,7 +705,7 @@ impl<'tokens> Parser<'tokens> {
                 let name = self.parse_identifier()?;
                 self.expect(is_colon, "`:`")?;
                 let value = self.parse_expression(0)?;
-                let field_span = Span::new(field_start, value.span.end);
+                let field_span = self.span(field_start, value.span.end);
                 fields.push(ObjectField {
                     name,
                     value,
@@ -559,7 +719,7 @@ impl<'tokens> Parser<'tokens> {
         }
 
         let close = self.expect(is_right_brace, "`}`")?;
-        let span = Span::new(open.start, close.end);
+        let span = self.span(open.start, close.end);
         let object = ObjectLiteral { fields, span };
         Ok(Expression {
             kind: ExpressionKind::ObjectLiteral(object),
@@ -581,7 +741,7 @@ impl<'tokens> Parser<'tokens> {
         }
 
         let close = self.expect(is_right_bracket, "`]`")?;
-        let span = Span::new(open.start, close.end);
+        let span = self.span(open.start, close.end);
         let array = ArrayLiteral { elements, span };
         Ok(Expression {
             kind: ExpressionKind::ArrayLiteral(array),
@@ -594,7 +754,7 @@ impl<'tokens> Parser<'tokens> {
             Some(Token::Dot) => {
                 self.advance();
                 let field = self.parse_identifier()?;
-                let span = Span::new(left.span.start, field.span.end);
+                let span = self.span(left.span.start, field.span.end);
                 let access = FieldAccessExpression {
                     object: Box::new(left),
                     field,
@@ -619,7 +779,7 @@ impl<'tokens> Parser<'tokens> {
                 }
 
                 let close = self.expect(is_right_paren, "`)`")?;
-                let span = Span::new(left.span.start, close.end);
+                let span = self.span(left.span.start, close.end);
                 let call = CallExpression {
                     callee: Box::new(left),
                     arguments,
@@ -634,7 +794,7 @@ impl<'tokens> Parser<'tokens> {
                 self.advance();
                 let index = self.parse_expression(0)?;
                 let close = self.expect(is_right_bracket, "`]`")?;
-                let span = Span::new(left.span.start, close.end);
+                let span = self.span(left.span.start, close.end);
                 let access = IndexExpression {
                     object: Box::new(left),
                     index: Box::new(index),
@@ -658,6 +818,7 @@ impl<'tokens> Parser<'tokens> {
 
     fn infix_binding_power(&self) -> Option<(BinaryOperator, u8, u8)> {
         let (operator, left_power) = match self.current()? {
+            Token::Nullish => (BinaryOperator::Coalesce, 0),
             Token::OrOr => (BinaryOperator::Or, 1),
             Token::AndAnd => (BinaryOperator::And, 3),
             Token::EqualEqual => (BinaryOperator::Equal, 5),
@@ -742,11 +903,15 @@ impl<'tokens> Parser<'tokens> {
             .unwrap_or_else(|| self.eof_span())
     }
 
+    fn span(&self, start: usize, end: usize) -> Span {
+        Span::in_source(self.source, start, end)
+    }
+
     fn eof_span(&self) -> Span {
         self.tokens
             .last()
-            .map(|(_, span)| Span::new(span.end, span.end))
-            .unwrap_or_default()
+            .map(|(_, span)| self.span(span.end, span.end))
+            .unwrap_or_else(|| self.span(0, 0))
     }
 
     fn advance(&mut self) -> Option<(Token, Span)> {
@@ -826,12 +991,16 @@ impl<'tokens> Parser<'tokens> {
 }
 
 fn can_start_expression(token: &Token) -> bool {
+    if matches!(token, Token::TemplateLiteral(_)) {
+        return true;
+    }
     matches!(
         token,
         Token::IntegerLiteral(_)
             | Token::NumberLiteral(_)
             | Token::StringLiteral(_)
             | Token::BooleanLiteral(_)
+            | Token::Null
             | Token::Identifier(_)
             | Token::LeftParen
             | Token::LeftBrace
@@ -841,8 +1010,23 @@ fn can_start_expression(token: &Token) -> bool {
     )
 }
 
+// EN: Parentheses and other expression forms delimit the logical/coalesce mix rule.
+// PT-BR: Parênteses e outras formas delimitam a regra de mistura lógico/coalesce.
+fn has_ungrouped_operator(expression: &Expression, operators: &[BinaryOperator]) -> bool {
+    if let ExpressionKind::Binary(binary) = &expression.kind {
+        operators.contains(&binary.operator)
+            || has_ungrouped_operator(&binary.left, operators)
+            || has_ungrouped_operator(&binary.right, operators)
+    } else {
+        false
+    }
+}
+
 fn is_identifier(token: &Token) -> bool {
     matches!(token, Token::Identifier(_))
+}
+fn is_module(token: &Token) -> bool {
+    matches!(token, Token::Identifier(name) if name == "module")
 }
 fn is_interface(token: &Token) -> bool {
     matches!(token, Token::Interface)

@@ -11,10 +11,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use truxt_ast::{BinaryOperator, UnaryOperator};
 use truxt_sema::{
-    ArgPassMode, BindingId, CallTempId, CloneMode, ExprDiscardMode, HirBlock, HirCallArgument,
-    HirDeclaration, HirElseBranch, HirExpr, HirExprKind, HirFunction, HirIf, HirImport, HirProgram,
-    HirStatement, ParameterPassMode, ResolvedType, RustDependency, CONSOLE_LOG_BUILTIN,
-    RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
+    ArgPassMode, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode, HirBlock,
+    HirCallArgument, HirDeclaration, HirElseBranch, HirExpr, HirExprKind, HirFunction, HirIf,
+    HirImport, HirProgram, HirStatement, ParameterPassMode, ResolvedType, RustDependency,
+    CONSOLE_LOG_BUILTIN, OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN,
+    RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
 };
 
 /// Emite um crate Rust executável que representa o programa HIR.
@@ -33,7 +34,7 @@ pub fn emit_rust(program: &HirProgram) -> String {
 pub fn emit_cargo_manifest(package_name: &str) -> String {
     let package_name = normalize_package_name(package_name);
     format!(
-        "[package]\nname = \"{package_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n\n[[bin]]\nname = \"truxt_program\"\npath = \"src/main.rs\"\n"
+        "[package]\nname = \"{package_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\nrust-version = \"1.94.1\"\n\n[workspace]\n\n[[bin]]\nname = \"truxt_program\"\npath = \"src/main.rs\"\n"
     )
 }
 
@@ -122,6 +123,18 @@ fn if_uses_console(i: &HirIf) -> bool {
 
 fn expr_uses_console(expression: &HirExpr) -> bool {
     match &expression.kind {
+        HirExprKind::Closure { captures, body, .. } => {
+            captures.iter().any(|(_, e)| expr_uses_console(e))
+                || body.statements.iter().any(statement_uses_console)
+        }
+        HirExprKind::ClosureCall { callee, arguments } => {
+            expr_uses_console(callee) || arguments.iter().any(expr_uses_console)
+        }
+        HirExprKind::OptionNone => false,
+        HirExprKind::OptionSome(payload) => expr_uses_console(payload),
+        HirExprKind::Coalesce {
+            option, fallback, ..
+        } => expr_uses_console(option) || expr_uses_console(fallback),
         HirExprKind::Call {
             function,
             arguments,
@@ -138,6 +151,7 @@ fn expr_uses_console(expression: &HirExpr) -> bool {
             object: operand, ..
         }
         | HirExprKind::Grouping(operand)
+        | HirExprKind::Move(operand)
         | HirExprKind::Clone {
             expression: operand,
             ..
@@ -162,10 +176,7 @@ fn normalize_package_name(input: &str) -> String {
         if character.is_ascii_alphanumeric() {
             output.push(character.to_ascii_lowercase());
             last_separator = false;
-        } else if (character == '-' || character == '_') && !last_separator {
-            output.push('-');
-            last_separator = true;
-        } else if !last_separator && !output.is_empty() {
+        } else if !last_separator && (character == '-' || character == '_' || !output.is_empty()) {
             output.push('-');
             last_separator = true;
         }
@@ -415,6 +426,41 @@ impl Emitter {
 
     fn expression(&mut self, expression: &HirExpr) -> String {
         match &expression.kind {
+            HirExprKind::Closure { captures, parameters, body } => {
+                let mut statements = Vec::new();
+                for (id, value) in captures {
+                    let value = self.expression(value);
+                    statements.push(format!("let {} = {value};", binding_name(*id)));
+                }
+                let parameters = parameters.iter().map(|p| {
+                    self.parameter_modes.insert(p.id, p.pass_mode);
+                    format!("{}{}: {}", if p.requires_mut_binding { "mut " } else { "" }, binding_name(p.id), self.rust_type(&p.ty))
+                }).collect::<Vec<_>>().join(", ");
+                let ResolvedType::Closure(_, result) = &expression.ty else { unreachable!() };
+                let previous = std::mem::take(&mut self.output);
+                self.emit_block_contents(body);
+                let body = std::mem::replace(&mut self.output, previous);
+                statements.push(format!("move |{parameters}| -> {} {{\n{body}\n}}", self.rust_type(result)));
+                format!("{{ {} }}", statements.join(" "))
+            }
+            HirExprKind::ClosureCall { callee, arguments } => {
+                let callee = self.expression(callee);
+                let arguments = arguments.iter().map(|a| self.expression(a)).collect::<Vec<_>>().join(", ");
+                format!("({callee})({arguments})")
+            }
+            HirExprKind::OptionNone => {
+                let ResolvedType::Optional(payload) = &expression.ty else { unreachable!("validated None must have an optional type") };
+                format!("::std::option::Option::<{}>::None", self.rust_type(payload))
+            }
+            HirExprKind::OptionSome(payload) => format!("::std::option::Option::Some({})", self.expression(payload)),
+            HirExprKind::Coalesce { option, fallback, mode } => {
+                let option = self.expression(option);
+                let fallback = self.expression(fallback);
+                let snapshot = self.temp_name();
+                let payload = self.temp_name();
+                let present = match mode { CoalesceMode::Value => payload.clone(), CoalesceMode::Optional => format!("::std::option::Option::Some({payload})") };
+                format!("{{ let {snapshot} = {option}; match {snapshot} {{ ::std::option::Option::Some({payload}) => {present}, ::std::option::Option::None => {fallback} }} }}")
+            }
             HirExprKind::IntegerLiteral(value) => {
                 if *value == i64::MIN {
                     "i64::MIN".to_owned()
@@ -501,6 +547,7 @@ impl Emitter {
                 self.expression(index)
             ),
             HirExprKind::Grouping(inner) => format!("({})", self.expression(inner)),
+            HirExprKind::Move(inner) => self.expression(inner),
             HirExprKind::Clone { expression, mode } => {
                 let expression = self.expression(expression);
                 clone_expression(&expression, *mode)
@@ -509,6 +556,18 @@ impl Emitter {
     }
 
     fn call(&mut self, function: &str, arguments: &[HirCallArgument]) -> String {
+        if function == "$template.stringify" {
+            let argument = self.call_argument(&arguments[0], None);
+            return format!("::std::format!(\"{{}}\", {argument})");
+        }
+        if matches!(function, OPTION_IS_SOME_BUILTIN | OPTION_UNWRAP_BUILTIN) {
+            let argument = self.call_argument(&arguments[0], None);
+            return if function == OPTION_IS_SOME_BUILTIN {
+                format!("({argument}).is_some()")
+            } else {
+                format!("::std::clone::Clone::clone(({argument}).as_ref().expect(\"option.unwrap called on None\"))")
+            };
+        }
         if matches!(
             function,
             RESULT_IS_OK_BUILTIN | RESULT_UNWRAP_BUILTIN | RESULT_UNWRAP_ERR_BUILTIN
@@ -672,6 +731,7 @@ impl Emitter {
 
     fn rust_type(&self, ty: &ResolvedType) -> String {
         match ty {
+            ResolvedType::Closure(..) => unreachable!("closure types are inferred locally"),
             ResolvedType::Int => "i64".to_owned(),
             ResolvedType::Number => "f64".to_owned(),
             ResolvedType::String => "String".to_owned(),
@@ -679,6 +739,9 @@ impl Emitter {
             ResolvedType::Void => "()".to_owned(),
             ResolvedType::Struct(name) => self.type_name(name),
             ResolvedType::Array(element) => format!("Vec<{}>", self.rust_type(element)),
+            ResolvedType::Optional(payload) => {
+                format!("::std::option::Option<{}>", self.rust_type(payload))
+            }
             ResolvedType::Result(ok, error) => format!(
                 "::std::result::Result<{}, {}>",
                 self.rust_type(ok),
@@ -783,6 +846,7 @@ fn format_number(value: f64) -> String {
 
 fn binary_operator(operator: BinaryOperator) -> &'static str {
     match operator {
+        BinaryOperator::Coalesce => unreachable!("validated coalesce uses its dedicated HIR node"),
         BinaryOperator::Add => "+",
         BinaryOperator::Subtract => "-",
         BinaryOperator::Multiply => "*",

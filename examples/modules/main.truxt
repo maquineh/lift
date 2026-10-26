@@ -1,0 +1,13 @@
+// EN: Root statements run once, even when an imported module refers back here.
+// PT-BR: Statements root executam uma vez, mesmo com ciclo voltando a este arquivo.
+import module "models.truxt";
+import module "math/api.truxt";
+import module "./models.truxt";
+
+function root_label(): string { return "root"; }
+
+const product: Product = make_product("  Truxt  ", 20);
+console.log(product.name);
+console.log(total(product, 3));
+console.log(module_label());
+console.log("root executed once");

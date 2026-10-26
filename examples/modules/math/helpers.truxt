@@ -1,0 +1,6 @@
+// EN: Cycles are allowed; canonical sources are included once.
+// PT-BR: Ciclos são permitidos; cada fonte canônica é incluída uma vez.
+import module "../main.truxt";
+import module "api.truxt";
+
+function multiply(left: int, right: int): int { return left * right; }

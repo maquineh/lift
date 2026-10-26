@@ -2,13 +2,118 @@
 //!
 //! PT-BR: Contratos de aceite e rejeição da gramática suportada pelo parser.
 
-use truxt_ast::{BinaryOperator, Declaration, ExpressionKind, Statement, TypeExpressionKind};
+use truxt_ast::{
+    BinaryOperator, Declaration, ExpressionKind, SourceId, Statement, TypeExpressionKind,
+};
 use truxt_lexer::tokenize;
 use truxt_parser::{parse, ParseErrorKind};
 
 fn parse_source(source: &str) -> Result<truxt_ast::ProgramAst, Vec<truxt_parser::ParseError>> {
     let tokens = tokenize(source).expect("fonte de teste deve tokenizar");
     parse(&tokens)
+}
+
+#[test]
+fn optional_array_suffixes_and_nullish_associativity_are_explicit() {
+    let ast = parse_source(
+        "function f(elements: int?[], array: int[]?): void {} const value = a ?? b ?? c;",
+    )
+    .unwrap();
+    let Declaration::Function(function) = &ast.declarations[0] else {
+        panic!("function")
+    };
+    let TypeExpressionKind::Array(element) = &function.parameters[0].ty.kind else {
+        panic!("array")
+    };
+    assert!(matches!(element.kind, TypeExpressionKind::Optional(_)));
+    let TypeExpressionKind::Optional(array) = &function.parameters[1].ty.kind else {
+        panic!("optional")
+    };
+    assert!(matches!(array.kind, TypeExpressionKind::Array(_)));
+    let Declaration::Statement(Statement::Variable(variable)) = &ast.declarations[1] else {
+        panic!("variable")
+    };
+    let ExpressionKind::Binary(binary) = &variable.initializer.kind else {
+        panic!("binary")
+    };
+    assert_eq!(binary.operator, BinaryOperator::Coalesce);
+    assert!(
+        matches!(&binary.left.kind, ExpressionKind::Binary(left) if left.operator == BinaryOperator::Coalesce)
+    );
+    assert!(parse_source("const value: int?? = null;").is_err());
+    assert!(parse_source("interface User { name?: string }").is_err());
+}
+
+#[test]
+fn logical_and_coalesce_mixing_requires_parentheses() {
+    for source in [
+        "a ?? b || c;",
+        "a || b ?? c;",
+        "a ?? b && c;",
+        "a && b ?? c;",
+    ] {
+        assert!(parse_source(source).is_err(), "{source}");
+    }
+    for source in [
+        "(a ?? b) || c;",
+        "a ?? (b || c);",
+        "(a && b) ?? c;",
+        "a && (b ?? c);",
+    ] {
+        parse_source(source).unwrap();
+    }
+}
+
+#[test]
+fn parses_module_imports_only_at_top_level_with_source_identity() {
+    let source = "import module \"../módulo.truxt\"; function module(): int { return 1; }";
+    let id = SourceId(7);
+    let tokens = truxt_lexer::tokenize_with_source(source, id).unwrap();
+    let ast = parse(&tokens).unwrap();
+    assert_eq!(ast.span.source, id);
+    let Declaration::ModuleImport(import) = &ast.declarations[0] else {
+        panic!("module import")
+    };
+    assert_eq!(import.path, "../módulo.truxt");
+    assert_eq!(import.span.source, id);
+    assert_eq!(import.path_span.source, id);
+    assert_eq!(&source[import.path_span.as_range()], "\"../módulo.truxt\"");
+    let Declaration::Function(function) = &ast.declarations[1] else {
+        panic!("function")
+    };
+    assert_eq!(function.name.name, "module");
+    assert_eq!(function.span.source, id);
+    assert_eq!(function.body.span.source, id);
+    assert_eq!(function.return_type.as_ref().unwrap().span.source, id);
+    let Statement::Return(statement) = &function.body.statements[0] else {
+        panic!("return")
+    };
+    assert_eq!(statement.span.source, id);
+    assert_eq!(statement.value.as_ref().unwrap().span.source, id);
+    for invalid in [
+        "import module file;",
+        "import module \"file.truxt\"",
+        "import module \"file.truxt\" as alias;",
+        "function f(): void { import module \"file.truxt\"; }",
+    ] {
+        assert!(parse_source(invalid).is_err(), "{invalid}");
+    }
+}
+
+#[test]
+fn source_aware_parser_preserves_empty_program_and_eof_error_ids() {
+    let id = SourceId(9);
+    assert_eq!(
+        truxt_parser::parse_with_source(&[], id)
+            .unwrap()
+            .span
+            .source,
+        id
+    );
+    let tokens = truxt_lexer::tokenize_with_source("function f(): void {", id).unwrap();
+    let errors = truxt_parser::parse_with_source(&tokens, id).unwrap_err();
+    assert!(errors.iter().all(|error| error.span.source == id));
+    assert!(errors.iter().any(|error| error.span.is_empty()));
 }
 
 #[test]
@@ -29,6 +134,28 @@ fn parses_result_types_with_array_and_nested_arguments() {
         &source[import.return_type.span.start..import.return_type.span.end],
         "Result<Result<string[], string>, string>"
     );
+}
+
+#[test]
+fn explicit_parser_source_normalizes_legacy_token_spans() {
+    let id = SourceId(12);
+    let tokens =
+        tokenize("import module \"dep.truxt\"; function f(value: string): void {}").unwrap();
+    let ast = truxt_parser::parse_with_source(&tokens, id).unwrap();
+    let Declaration::ModuleImport(import) = &ast.declarations[0] else {
+        panic!("module")
+    };
+    assert_eq!(import.path_span.source, id);
+    assert_eq!(import.span.source, id);
+    let Declaration::Function(function) = &ast.declarations[1] else {
+        panic!("function")
+    };
+    assert_eq!(function.name.span.source, id);
+    assert_eq!(function.parameters[0].name.span.source, id);
+    assert_eq!(function.parameters[0].ty.span.source, id);
+    let tokens = tokenize("function unfinished(").unwrap();
+    let errors = truxt_parser::parse_with_source(&tokens, id).unwrap_err();
+    assert!(errors.iter().all(|error| error.span.source == id));
 }
 
 #[test]
@@ -72,7 +199,6 @@ fn rejects_imports_without_explicit_signature_source_or_terminator() {
         "import function f(): int from value;",
         "import function f(): int from \"crate@1.2.3::f\"",
         "function f() { import function g(): int from \"crate@1.2.3::g\"; }",
-        "import function f(a: int?): int from \"crate@1.2.3::f\";",
     ] {
         assert!(parse_source(source).is_err(), "deve rejeitar: {source}");
     }

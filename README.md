@@ -1,16 +1,20 @@
 # Truxt
 
-Truxt is a small, statically typed language that compiles a single `.truxt` source file to Rust and then uses Cargo to check, build, or run it.
+Rust/Cargo **1.94.1+** (MSRV: `1.94.1`).
 
-> **v0.1 scope:** a compiler for single-file programs, with a bundled standard library, safe Rust imports, console output, and UTF-8 input/files. The installed executable can be moved independently of this checkout. Rust, Cargo, and a host linker are still required to compile programs.
+Truxt is a small, statically typed language that compiles a `.truxt` entry file and its explicit file modules to Rust, then uses Cargo to check, build, or run it.
+
+> **Current scope:** typed programs with explicit relative modules, a bundled standard library, safe Rust imports, console output, and Result-based UTF-8 input/files. The installed executable can be moved independently of this checkout. Rust, Cargo, and a host linker are still required to compile programs.
+
+Truxt aims to feel familiar to TypeScript users within a documented subset; it is not a full TypeScript implementation. New language features must define their Truxt semantics and lower to valid Rust while accounting for Rust's ownership, borrowing, and safety rules.
 
 ## Requirements
 
-- A stable Rust toolchain with `rustc` and `cargo` available on `PATH`.
+- Rust **1.94.1+**, with `rustc` and `cargo` available on `PATH`.
 - A working linker for the Rust host target.
 - Network access when a program imports a registry crate that is not already cached by Cargo.
 
-The current validation environment is Windows x86_64 with Rust/Cargo 1.94.1 and the MSVC host target. Other hosts and a minimum supported Rust version have not been validated yet. Build and run for the host target; cross-target binaries may not execute on the current machine.
+The current validation environment is Windows x86_64 with Rust/Cargo 1.94.1 and the MSVC host target. The minimum supported Rust version (MSRV) is 1.94.1; other hosts have not been validated yet. Build and run for the host target; cross-target binaries may not execute on the current machine.
 
 ## Build the CLI from this checkout
 
@@ -70,7 +74,32 @@ With the built executable on `PATH`, the same commands are `truxt init hello` an
 | `truxt build file.truxt` | Compile in release mode and copy the executable next to the source file. |
 | `truxt run file.truxt [-- args...]` | Compile in release mode and run the generated executable, forwarding arguments. |
 
-Generated Rust projects and Cargo build artifacts are stored under `.truxt_cache/<source-name>/` beside the source file. The CLI extracts its embedded core into that project's `truxt_core/` directory and uses a relative Cargo dependency. Unchanged embedded files are reused; changes to that extracted copy are overwritten on the next command. Each CLI invocation handles one `.truxt` file; multi-file projects are not supported yet.
+Generated projects and Cargo artifacts are stored under `.truxt_cache/<entry-name>/` beside the entry file. The CLI extracts its core into that project's `truxt_core/` directory and uses a relative Cargo dependency. Generated `main.rs`, `Cargo.toml`, and core files are written only when their bytes change. Changes to the extracted core are overwritten on the next command. This avoids unnecessary rewrites; module loading, analysis, code generation, and Cargo still run every time, so it is not a complete content-keyed cache.
+
+## File modules
+
+Import another Truxt source at the top level:
+
+```truxt
+import module "lib/math.truxt";
+console.log(double(21));
+```
+
+`lib/math.truxt` can declare the function:
+
+```truxt
+function double(value: int): int { return value * 2; }
+```
+
+Paths are relative to the importing file and must include `.truxt`. Imports are recursive; canonical paths are included once, so repeated imports and cycles are allowed. Only the entry file may contain executable top-level statements. Imported modules may declare functions, interfaces, Rust FFI imports, and further module imports. Declarations share a global namespace; duplicate names are errors with labels at both files. There are no module aliases, namespaces, exports, or project manifest yet. Rust `import function ... from ...` syntax is unchanged.
+
+Run `truxt run examples/modules/main.truxt` for relative/transitive imports, FFI, shared types, and cycles including the entry file. See [the module contract](docs/modules.md) for source identity and exact limits.
+
+## Source diagnostics
+
+Lexical, syntax, and semantic errors use Ariadne reports showing the source path, message, excerpt, primary label, and a related label when the compiler supplies a secondary span. UTF-8 byte spans are rendered at the correct character position, including empty EOF spans. Source errors retain exit code `1`.
+
+Colors are enabled only on an interactive stderr terminal and can be disabled with `NO_COLOR`; redirected output has no ANSI colors. Cargo/rustc diagnostics remain Cargo's own reports about the generated Rust, without remapping to Truxt source. See [diagnostics and generated files](docs/diagnostics-and-build.md) for the implementation contract.
 
 ## Language and interop scope
 
@@ -95,7 +124,19 @@ import function trim(value: string): string from "truxt_core::interop::string_tr
 import function contains(values: int[], value: int): boolean from "truxt_core::interop::array_contains_int";
 ```
 
-The adapters also provide `string_len` and `array_contains_number`, `array_contains_boolean`, and `array_contains_string`. Callback helpers (`map`, `filter`, and `find`) remain Rust-only because Truxt does not yet support closures. See [the core library guide](stdlib/truxt_core/README.md) for the full API.
+The adapters also provide `string_len` and `array_contains_number`, `array_contains_boolean`, and `array_contains_string`. Callback helpers (`map`, `filter`, and `find`) remain Rust-only because the current closure subset has no higher-order/FFI function types. See [the core library guide](stdlib/truxt_core/README.md) for the full API.
+
+## Optional values
+
+Use `T?`, contextual `null`, and explicit `option.some(value)`:
+
+```truxt
+const absent: int? = null;
+const present = option.some(7);
+console.log(absent ?? present ?? 9);
+```
+
+`??` evaluates its left once and its fallback only for absence. `T? ?? T` returns `T`; `T? ?? T?` remains optional. `option.is_some` tests and `option.unwrap` clones a present payload; unwrap on absence panics. `int?[]` is an array of optionals, while `int[]?` is an optional array. Fields typed `T?` remain required. There is no implicit lift, `undefined` absence, narrowing, omitted optional field, or FFI Option. See [the exact Option contract](docs/option.md), including inference and operator-parentheses limits.
 
 ## Input and files
 
@@ -131,11 +172,10 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 
 ## Current limitations
 
-- One source file per CLI invocation; no project manifest or multi-file module system.
-- No content-keyed cache. Cargo's own incremental build artifacts are reused.
-- Ownership analysis is conservative and rejects some complex aliasing patterns. It does not yet implement CFG/liveness analysis or move optimization at the last use.
-- General methods/`impl`, arrow functions/closures in Truxt, optional types, `??`, template strings, unions, and `try/catch` are not implemented.
-- Source diagnostics are plain text rather than Ariadne reports.
+- One entry file per CLI invocation, with explicit relative file imports; no project manifest, module namespaces, or aliases.
+- No complete content-keyed cache. Identical generated files are preserved, and Cargo reuses its own incremental artifacts; analysis/code generation still run each time.
+- Ownership analysis remains conservative and rejects some complex aliasing patterns. A private CFG/liveness pass removes only proven last-use clones of direct owned locals; borrowed values, projections, repeated statement uses, and `ByClone` call arguments retain their copies. See [the ownership optimization contract](docs/liveness.md).
+- Nominal methods/`impl`, local snapshot arrow closures, and primitive template interpolation are supported; see [their contracts and limits](docs/methods-closures-templates.md). Unions and `try/catch` remain unimplemented. Option remains outside the FFI, and optional fields cannot be omitted.
 - Result support uses `is_ok` and cloned unwrap operations; constructors, matching, and automatic error propagation are not implemented.
 
 ## Examples and tests
@@ -146,6 +186,10 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 - `examples/stdlib.truxt` — FFI-compatible lengths, membership, Unicode text, and trimming.
 - `examples/io.truxt` — arguments, stdin, and UTF-8 file round trips.
 - `examples/registry.truxt` — `num-integer` 0.1.46 imported with an exact version.
+- `examples/modules/main.truxt` — recursive file modules, global declarations, repeated imports, and cycles.
+- `examples/methods-closures-templates.truxt` - receiver mutation, snapshot captures, nested templates, and evaluation order.
+- `examples/liveness.truxt` — last-use copies, joins, returns, loops, and reassignment validated through Rust compilation.
+- `examples/option.truxt` — optional values, chained lazy fallbacks, and exactly-once effects.
 
 Run the workspace suite with:
 

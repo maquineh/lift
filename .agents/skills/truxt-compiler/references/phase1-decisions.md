@@ -10,5 +10,5 @@ Este arquivo registra escolhas da implementação atual para orientar as próxim
 - `NumberLiteral` carrega `f64` finito; valores que resultam em infinito, como `1e999`, são erro lexical.
 - Strings com aspas simples ou duplas guardam o conteúdo sem delimitadores e preservam escapes sem decodificá-los. Literais não podem atravessar linha. Template strings e interpolação ficam para uma fase posterior.
 - Espaços, comentários de linha e comentários de bloco fechados são ignorados. Strings e comentários de bloco sem fechamento produzem erro com span.
-- O lexer reconhece alguns operadores futuros (`=>`, `??`) para preservar tokens, mas isso não implementa parsing nem semântica desses recursos.
+- O lexer reconhece o operador futuro `=>` sem implementar closures. `??`, o sufixo de tipo `?` e o literal reservado `null` já têm parsing/semântica no contrato Option v1 da Fase 4. `undefined` não é valor de ausência.
 - `tokenize` para na primeira falha e retorna `LexError` com categoria e span. Consumidores devem usar esse contrato, sem depender do tipo de erro interno exigido pelo derive do Logos.

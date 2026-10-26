@@ -4,16 +4,29 @@
 
 use std::ops::Range;
 
-/// Intervalo semiaberto de offsets em bytes na fonte UTF-8 (`start..end`).
+/// File identity within one compilation; PT-BR: identidade de fonte numa compilação.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SourceId(pub usize);
+
+/// Half-open byte offsets in one source; PT-BR: offsets de bytes em uma fonte.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Span {
+    pub source: SourceId,
     pub start: usize,
     pub end: usize,
 }
 
 impl Span {
     pub const fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        Self::in_source(SourceId(0), start, end)
+    }
+
+    pub const fn in_source(source: SourceId, start: usize, end: usize) -> Self {
+        Self { source, start, end }
+    }
+
+    pub const fn with_source(self, source: SourceId) -> Self {
+        Self { source, ..self }
     }
 
     pub const fn is_empty(self) -> bool {
@@ -25,7 +38,15 @@ impl Span {
     }
 
     pub fn join(self, other: Self) -> Self {
-        Self::new(self.start.min(other.start), self.end.max(other.end))
+        assert_eq!(
+            self.source, other.source,
+            "cannot join spans from different sources"
+        );
+        Self::in_source(
+            self.source,
+            self.start.min(other.start),
+            self.end.max(other.end),
+        )
     }
 
     pub fn as_range(self) -> Range<usize> {
@@ -47,7 +68,7 @@ impl From<Span> for Range<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::Span;
+    use super::{SourceId, Span};
 
     #[test]
     fn joins_spans_and_converts_to_range() {
@@ -64,5 +85,18 @@ mod tests {
 
         assert!(eof.is_empty());
         assert_eq!(eof.len(), 0);
+    }
+
+    #[test]
+    fn source_identity_is_preserved_when_joining() {
+        let source = SourceId(7);
+        let span = Span::in_source(source, 2, 5).join(Span::in_source(source, 9, 11));
+        assert_eq!(span, Span::in_source(source, 2, 11));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot join spans from different sources")]
+    fn spans_from_different_files_cannot_be_joined() {
+        Span::new(0, 1).join(Span::in_source(SourceId(1), 0, 1));
     }
 }

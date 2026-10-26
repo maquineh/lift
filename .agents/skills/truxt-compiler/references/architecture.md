@@ -6,6 +6,17 @@ Esta referência consolida o blueprint fornecido pelo usuário. Ela descreve o a
 
 Fluxo pretendido: fonte `.truxt` → AST → HIR tipado → código Rust → binário nativo.
 
+## Compatibilidade TypeScript/Rust
+
+Truxt busca familiaridade de sintaxe e semântica com TypeScript em um subconjunto
+explicitamente suportado; não promete compatibilidade completa com TypeScript.
+Cada recurso novo deve documentar sua semântica Truxt, limites em relação ao
+TypeScript e lowering para Rust, preservando comportamento previsível e tipos
+válidos. Ownership, borrowing, segurança e regras de tipos do Rust podem limitar
+o subconjunto, mas não devem introduzir diferenças silenciosas. Valide o código
+Rust gerado com Cargo/rustc nos exemplos e casos de contrato afetados antes de
+afirmar compatibilidade.
+
 ```text
 truxt/
 ├── Cargo.toml
@@ -33,11 +44,23 @@ truxt/
 
 O blueprint também sugere criar AST e lexer com tokens/nós para objetos, funções, arrays e operadores na etapa inicial. Isso pode ser preparação estrutural; não significa que parser, semântica e codegen dessas funcionalidades estejam entregues na Fase 1. Mantenha explícito qual camada e qual fase passam a suportá-las.
 
+Estado do incremento posterior à v0.1: a CLI já usa Ariadne 0.6.0 com spans em
+bytes e preserva arquivos gerados de conteúdo idêntico. Isso não é cache completo
+por chave de conteúdo. Módulos relativos explícitos, SourceId e tabela global
+já estão implementados, sem manifesto ou namespaces. O contrato
+está em `modules-decisions.md`. Os demais contratos estão em `codegen-cli-decisions.md` e nos guias
+`docs/diagnostics-and-build.md` / `.pt-BR.md` da raiz.
+
+O incremento atual exige Rust/Cargo 1.94.1+ e acrescenta métodos nominais/impl,
+closures locais com captura snapshot e templates primitivos contextuais. Consulte
+`methods-closures-templates-decisions.md` para os contratos, diferenças em relação
+ao TypeScript e limites de ownership; callbacks/escape de closure seguem fora.
+
 ## Pipelines
 
 ### A. Fonte para AST
 
-1. O loader lê `.truxt`, mantém o texto no `SourceMap` e fornece posições `Span { start: usize, end: usize }`.
+1. O loader lê o grafo `.truxt`, mantém textos/caminhos no SourceMap da CLI e fornece `Span { source: SourceId, start: usize, end: usize }`. Construtores/APIs legadas continuam com fonte zero.
 2. `truxt_lexer` produz `Vec<(Token, Span)>`; cada nó AST deve preservar seu `Span`. O blueprint prevê interpolação de template string em partes de texto e expressão.
 3. `truxt_parser` usa recursive descent para declarações e Pratt parsing para expressões binárias e pós-fixadas (`.`, `()`, `[]`), produzindo `UntypedAST`.
 
@@ -82,10 +105,11 @@ Essas traduções dependem de tipos e ownership: `.map()` não implica sempre `.
 
 ```ebnf
 Program       ::= Decl*
-Decl          ::= InterfaceDecl | FnDecl | ImportDecl | Stmt
+Decl          ::= InterfaceDecl | FnDecl | ImportDecl | ModuleImportDecl | Stmt
 InterfaceDecl ::= "interface" Ident "{" (Ident ":" Type ","?)* "}"
 FnDecl        ::= "function" Ident "(" ParamList? ")" (":" Type)? Block
 ImportDecl    ::= "import" "function" Ident "(" ParamList? ")" ":" Type "from" StrLit ";"
+ModuleImportDecl ::= "import" "module" StrLit ";"
 ParamList     ::= Param ("," Param)*
 Param         ::= Ident ":" Type
 Block         ::= "{" Stmt* "}"

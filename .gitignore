@@ -8,3 +8,7 @@
 /examples/stdlib
 /examples/io
 /examples/registry
+/examples/liveness
+/examples/option
+/examples/modules/main
+/examples/modules/main.exe

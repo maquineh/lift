@@ -2,6 +2,7 @@
 name = "truxt_ast"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Tipos da AST não tipada do Truxt"
 
 [dependencies]

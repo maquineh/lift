@@ -1,0 +1,52 @@
+// EN: Last-use moves preserve outputs through joins, loops, returns, and reassignment.
+// PT-BR: Moves de último uso preservam saída em joins, loops, retornos e reatribuição.
+function choose(flag: boolean, value: string): string {
+    if flag { return value; }
+    return value;
+}
+
+function loops(count: int): void {
+    const source = "loop";
+    let index = 0;
+    while index < count {
+        const copy = source;
+        console.log(copy);
+        index = index + 1;
+    }
+    const last = source;
+    console.log(last);
+}
+
+function early(flag: boolean): string {
+    const value = "return";
+    if flag { return value; }
+    console.log(value);
+    return value;
+}
+
+function terminal(): string {
+    const value = "terminal";
+    const copy = value;
+    return copy;
+    console.log(value);
+}
+
+const first = "last";
+const final = first;
+console.log(final);
+let original = "old";
+const copied = original;
+original = "new";
+console.log(copied);
+console.log(original);
+const repeated = "repeat";
+const copies = [repeated, repeated];
+console.log(copies[0]);
+console.log(copies[1]);
+console.log(choose(true, "yes"));
+console.log(choose(false, "no"));
+loops(0);
+loops(2);
+console.log(early(true));
+console.log(early(false));
+console.log(terminal());

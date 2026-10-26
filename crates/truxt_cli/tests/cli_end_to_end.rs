@@ -8,9 +8,26 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
+    time::{Duration, UNIX_EPOCH},
 };
 
 static NEXT_TEMP_DIR: AtomicUsize = AtomicUsize::new(0);
+
+#[test]
+fn methods_closures_and_templates_compile_and_run() {
+    let temp = TempDir::new("methods-closures-templates");
+    let source = temp.path().join("features.truxt");
+    fs::write(
+        &source,
+        include_str!("../../../examples/methods-closures-templates.truxt"),
+    )
+    .unwrap();
+    let checked = cli().arg("check").arg(&source).output().unwrap();
+    assert_success(&checked, "check methods/closures/templates");
+    let output = cli().arg("run").arg(&source).output().unwrap();
+    assert_success(&output, "run methods/closures/templates");
+    assert!(String::from_utf8(output.stdout).unwrap().replace("\r\n", "\n").ends_with("3\n4\ncount:1\ncount:4\nhello, Truxt!\nhello, Rust!\nnested value 4 ${literal} `tick`\norder 4/5/5\ncount:5\n10\nborrowed\n12\n10\n11\nhello\n22\n23\n22\n2\ninside\n"));
+}
 
 struct TempDir(PathBuf);
 
@@ -69,6 +86,274 @@ fn run_with_input(mut command: Command, input: &str) -> Output {
         .write_all(input.as_bytes())
         .expect("entrada deve ser enviada");
     child.wait_with_output().expect("processo deve terminar")
+}
+
+fn write_module_example(directory: &Path) -> PathBuf {
+    for (relative, contents) in [
+        (
+            "main.truxt",
+            include_str!("../../../examples/modules/main.truxt"),
+        ),
+        (
+            "models.truxt",
+            include_str!("../../../examples/modules/models.truxt"),
+        ),
+        (
+            "math/api.truxt",
+            include_str!("../../../examples/modules/math/api.truxt"),
+        ),
+        (
+            "math/helpers.truxt",
+            include_str!("../../../examples/modules/math/helpers.truxt"),
+        ),
+    ] {
+        let path = directory.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    directory.join("main.truxt")
+}
+
+#[test]
+fn liveness_moves_compile_with_rustc_and_preserve_control_flow_outputs() {
+    let directory = TempDir::new("liveness");
+    let source = directory.path().join("liveness.truxt");
+    fs::write(&source, include_str!("../../../examples/liveness.truxt")).unwrap();
+    let expected = "last\nold\nnew\nrepeat\nrepeat\nyes\nno\nloop\nloop\nloop\nloop\nreturn\nreturn\nreturn\nterminal\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("liveness {command}"));
+        if command == "run" {
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .replace("\r\n", "\n")
+                .ends_with(expected));
+        }
+    }
+    let output = Command::new(directory.path().join(binary_name("liveness")))
+        .output()
+        .unwrap();
+    assert_success(&output, "binário liveness");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
+fn option_coalesce_is_lazy_exactly_once_and_preserves_optional_sources() {
+    let directory = TempDir::new("option");
+    let source = directory.path().join("option.truxt");
+    fs::write(&source, include_str!("../../../examples/option.truxt")).unwrap();
+    let expected = "7\n1\n9\n12\n5\n112\ntrue\n5\n112\nfalse\n0\n\n112\nfalse\nkeep\nkeep\nkeep\nmissing\n1\n2\n3\nunknown\n42\ntrue\ntrue\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("Option {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let output = Command::new(directory.path().join(binary_name("option")))
+        .output()
+        .unwrap();
+    assert_success(&output, "binário Option");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
+fn option_unwrap_none_is_an_explicit_runtime_failure() {
+    let directory = TempDir::new("option-unwrap");
+    let source = directory.path().join("unwrap.truxt");
+    fs::write(
+        &source,
+        "const value: int? = null; console.log(option.unwrap(value));",
+    )
+    .unwrap();
+    let output = cli().arg("run").arg(source).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("option.unwrap called on None"));
+}
+
+#[test]
+fn modules_resolve_relative_transitive_repeated_and_cyclic_imports_once() {
+    let directory = TempDir::new("modules");
+    let project = directory.path().join("projeto á");
+    let root = write_module_example(&project);
+    let unrelated_cwd = directory.path().join("other-cwd");
+    fs::create_dir_all(&unrelated_cwd).unwrap();
+    let expected = "Truxt\n60\nroot\nroot executed once\n";
+    for command in ["check", "build", "run"] {
+        let output = cli()
+            .current_dir(&unrelated_cwd)
+            .arg(command)
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert_success(&output, &format!("módulos: {command}"));
+        if command == "run" {
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .replace("\r\n", "\n")
+                .ends_with(expected));
+        }
+    }
+    let binary = Command::new(project.join(binary_name("main")))
+        .output()
+        .unwrap();
+    assert_success(&binary, "binário multi-arquivo");
+    assert_eq!(
+        String::from_utf8(binary.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+
+    let helper = project.join("math/helpers.truxt");
+    let changed = fs::read_to_string(&helper)
+        .unwrap()
+        .replace("left * right", "left + right");
+    fs::write(helper, changed).unwrap();
+    let output = cli().arg("run").arg(root).output().unwrap();
+    assert_success(&output, "mudança transitiva de módulo");
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .replace("\r\n", "\n")
+        .ends_with("Truxt\n23\nroot\nroot executed once\n"));
+}
+
+#[test]
+fn imported_modules_reject_every_top_level_statement_kind() {
+    let directory = TempDir::new("module-statements");
+    let root = directory.path().join("main.truxt");
+    let module = directory.path().join("module.truxt");
+    fs::write(&root, "import module \"module.truxt\"; console.log(1);").unwrap();
+    for contents in [
+        "const value = 1;",
+        "let value = 1;",
+        "value = 1;",
+        "console.log(1);",
+        "if true { console.log(1); }",
+        "while false { console.log(1); }",
+        "return;",
+    ] {
+        fs::write(&module, contents).unwrap();
+        let output = cli().arg("check").arg(&root).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{contents}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("module.truxt:1:"), "{stderr}");
+        assert!(stderr.contains("statement executável de topo"), "{stderr}");
+    }
+    fs::write(&module, "").unwrap();
+    assert_success(
+        &cli().arg("check").arg(root).output().unwrap(),
+        "módulo vazio",
+    );
+}
+
+#[test]
+fn imported_source_diagnostics_keep_their_file_and_utf8_byte_positions() {
+    let directory = TempDir::new("module-diagnostics");
+    let root = directory.path().join("main.truxt");
+    let module = directory.path().join("dep.truxt");
+    fs::write(&root, "import module \"dep.truxt\"; console.log(1);").unwrap();
+    for (contents, marker) in [
+        (
+            "function invalid(): void { const text = \"á🙂\"; @ }",
+            Some("@"),
+        ),
+        (
+            "function invalid(): void { const text = \"á🙂\"; const broken: int = ; }",
+            Some(";"),
+        ),
+        (
+            "function invalid(): int { const text = \"á🙂\"; return true; }",
+            Some("true"),
+        ),
+        ("function invalid(): void { const text = \"á🙂\";", None),
+    ] {
+        fs::write(&module, contents).unwrap();
+        let output = cli().arg("check").arg(&root).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let offset = marker.map_or(contents.len(), |marker| contents.rfind(marker).unwrap());
+        let column = contents[..offset].chars().count() + 1;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("dep.truxt:1:{column}")),
+            "{stderr}"
+        );
+        assert!(stderr.contains(contents), "{stderr}");
+        assert!(!stderr.contains("main.truxt:"), "{stderr}");
+    }
+}
+
+#[test]
+fn duplicate_global_declarations_label_both_imported_files() {
+    let directory = TempDir::new("module-duplicates");
+    let root = directory.path().join("main.truxt");
+    fs::write(
+        &root,
+        "import module \"first.truxt\"; import module \"second.truxt\";",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("first.truxt"),
+        "// á🙂\nfunction shared(): int { return 1; }",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("second.truxt"),
+        "// ação🙂\nfunction shared(): int { return 2; }",
+    )
+    .unwrap();
+    let output = cli().arg("check").arg(root).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches("Error:").count(), 1, "{stderr}");
+    assert!(stderr.contains("first.truxt:2:"), "{stderr}");
+    assert!(stderr.contains("second.truxt:2:"), "{stderr}");
+    assert!(stderr.contains("local relacionado"), "{stderr}");
+    assert!(stderr.contains("return 1;"), "{stderr}");
+    assert!(stderr.contains("return 2;"), "{stderr}");
+}
+
+#[test]
+fn invalid_or_unreadable_module_paths_label_the_importing_source() {
+    let directory = TempDir::new("module-paths");
+    let root = directory.path().join("main.truxt");
+    let absolute = directory
+        .path()
+        .join("absolute.truxt")
+        .to_string_lossy()
+        .replace('\\', "/");
+    for path in [
+        "".to_owned(),
+        "dep.txt".to_owned(),
+        absolute,
+        "missing.truxt".to_owned(),
+    ] {
+        fs::write(&root, format!("import module \"{path}\";")).unwrap();
+        let output = cli().arg("check").arg(&root).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("main.truxt:1:"), "{stderr}");
+    }
+    fs::write(&root, "import module \"invalid.truxt\";").unwrap();
+    fs::write(directory.path().join("invalid.truxt"), [0xff]).unwrap();
+    let output = cli().arg("check").arg(root).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("main.truxt:1:"), "{stderr}");
+    assert!(stderr.contains("fonte UTF-8"), "{stderr}");
 }
 
 #[test]
@@ -545,7 +830,129 @@ fn check_reports_source_errors_with_location() {
         "diagnóstico deve apontar arquivo e linha: {stderr}"
     );
     assert!(
-        stderr.contains("erro:"),
+        stderr.contains("Error:"),
         "diagnóstico deve identificar o erro: {stderr}"
+    );
+}
+
+#[test]
+fn ariadne_reports_lexical_syntax_semantic_and_empty_eof_spans_with_utf8() {
+    let directory = TempDir::new("ariadne");
+    let cases = [
+        ("lexical.truxt", "const texto = \"é🙂\"; @", Some("@")),
+        (
+            "syntax.truxt",
+            "const texto = \"é🙂\"; const value: int = ;",
+            Some(";"),
+        ),
+        (
+            "semantic.truxt",
+            "const texto = \"é🙂\"; const value: int = true;",
+            Some("true"),
+        ),
+        ("eof.truxt", "function broken(): void {", None),
+    ];
+    for (file_name, contents, marker) in cases {
+        let source = directory.path().join(file_name);
+        fs::write(&source, contents).unwrap();
+        let output = cli().arg("check").arg(source).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{file_name}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        let offset = marker.map_or(contents.len(), |marker| contents.rfind(marker).unwrap());
+        let column = contents[..offset].chars().count() + 1;
+        assert!(
+            stderr.contains(&format!("{file_name}:1:{column}")),
+            "{stderr}"
+        );
+        assert!(stderr.contains("Error:"), "{stderr}");
+        assert!(stderr.contains(contents), "{stderr}");
+        assert!(
+            !stderr.contains('\u{1b}'),
+            "saída capturada deve omitir cores: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn ariadne_keeps_related_semantic_labels_in_one_report() {
+    let directory = TempDir::new("ariadne-secondary");
+    let source = directory.path().join("duplicate.truxt");
+    fs::write(
+        &source,
+        "function item(value: string): void {}\nfunction item(value: int): void {}",
+    )
+    .unwrap();
+    let output = cli().arg("check").arg(source).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.matches("Error:").count(), 1, "{stderr}");
+    assert!(stderr.contains("local relacionado"), "{stderr}");
+    assert!(
+        stderr.contains("function item(value: string): void {}"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("function item(value: int): void {}"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn generated_files_keep_timestamps_until_their_content_changes() {
+    let directory = TempDir::new("rewrite");
+    let source = directory.path().join("rewrite.truxt");
+    fs::write(&source, "const value: int = 1;").unwrap();
+    let check = || {
+        let output = cli().arg("check").arg(&source).output().unwrap();
+        assert_success(&output, "verificação de reescrita");
+    };
+    check();
+    let generated = directory.path().join(".truxt_cache/rewrite/src/main.rs");
+    let manifest = directory.path().join(".truxt_cache/rewrite/Cargo.toml");
+    let original_rust = fs::read(&generated).unwrap();
+    let original_manifest = fs::read(&manifest).unwrap();
+    let old = UNIX_EPOCH + Duration::from_secs(946_684_800);
+    for path in [&generated, &manifest] {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+    }
+    // EN: Set a fixed historical timestamp; no sleeps or clock-resolution assumptions.
+    // PT-BR: Timestamp histórico fixo; sem sleeps ou dependência da resolução do relógio.
+    let retained_rust_time = fs::metadata(&generated).unwrap().modified().unwrap();
+    let retained_manifest_time = fs::metadata(&manifest).unwrap().modified().unwrap();
+    check();
+    assert_eq!(
+        fs::metadata(&generated).unwrap().modified().unwrap(),
+        retained_rust_time
+    );
+    assert_eq!(
+        fs::metadata(&manifest).unwrap().modified().unwrap(),
+        retained_manifest_time
+    );
+    assert_eq!(fs::read(&generated).unwrap(), original_rust);
+    assert_eq!(fs::read(&manifest).unwrap(), original_manifest);
+
+    fs::write(&source, "const value: int = 2;").unwrap();
+    check();
+    assert_ne!(fs::read(&generated).unwrap(), original_rust);
+    assert_ne!(
+        fs::metadata(&generated).unwrap().modified().unwrap(),
+        retained_rust_time
+    );
+    assert_eq!(
+        fs::metadata(&manifest).unwrap().modified().unwrap(),
+        retained_manifest_time
+    );
+
+    fs::write(&source, "console.log(2);").unwrap();
+    check();
+    assert_ne!(fs::read(&manifest).unwrap(), original_manifest);
+    assert_ne!(
+        fs::metadata(&manifest).unwrap().modified().unwrap(),
+        retained_manifest_time
     );
 }

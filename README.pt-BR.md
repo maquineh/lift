@@ -1,16 +1,20 @@
 # Truxt
 
-Truxt é uma linguagem pequena e estaticamente tipada que compila um arquivo `.truxt` para Rust e usa Cargo para verificar, compilar ou executar o programa.
+Rust/Cargo **1.94.1+** (MSRV: `1.94.1`).
 
-> **Escopo da v0.1:** compilador para programas de arquivo único, com biblioteca padrão embutida, imports Rust seguros, console e entrada/arquivos UTF-8. O executável instalado pode ser movido independentemente deste checkout. Rust, Cargo e um linker do host continuam necessários para compilar programas.
+Truxt é uma linguagem pequena e estaticamente tipada que compila uma entrada `.truxt` e seus módulos explícitos para Rust, usando Cargo para verificar, compilar ou executar.
+
+> **Escopo atual:** programas tipados com módulos relativos explícitos, biblioteca padrão embutida, imports Rust seguros, console e I/O UTF-8 baseado em Result. O executável pode ser movido independentemente do checkout. Rust, Cargo e um linker do host continuam necessários para compilar programas.
+
+Truxt busca ser familiar para quem usa TypeScript dentro de um subconjunto documentado; não é uma implementação completa de TypeScript. Cada recurso novo deve definir a semântica Truxt e gerar Rust válido, considerando ownership, borrowing e segurança do Rust.
 
 ## Requisitos
 
-- Toolchain estável do Rust, com `rustc` e `cargo` disponíveis no `PATH`.
+- Rust **1.94.1+**, com `rustc` e `cargo` disponíveis no `PATH`.
 - Linker funcional para o target hospedeiro do Rust.
 - Acesso à rede quando o programa importar uma crate registry que ainda não esteja no cache do Cargo.
 
-O ambiente validado atualmente é Windows x86_64 com Rust/Cargo 1.94.1 e target hospedeiro MSVC. Outros hosts e uma versão mínima do Rust ainda não foram validados. Compile e execute para o host; binários de compilação cruzada podem não executar nesta máquina.
+O ambiente validado atualmente é Windows x86_64 com Rust/Cargo 1.94.1 e target hospedeiro MSVC. A versão mínima suportada (MSRV) é 1.94.1; outros hosts ainda não foram validados. Compile e execute para o host; binários de compilação cruzada podem não executar nesta máquina.
 
 ## Compile a CLI a partir deste checkout
 
@@ -70,7 +74,32 @@ Com o executável compilado no `PATH`, os comandos equivalentes são `truxt init
 | `truxt build arquivo.truxt` | Compila em modo release e copia o executável para perto do arquivo fonte. |
 | `truxt run arquivo.truxt [-- args...]` | Compila em modo release e executa o binário, encaminhando os argumentos. |
 
-Os projetos Rust gerados e os artefatos Cargo ficam em `.truxt_cache/<nome-da-fonte>/`, ao lado do arquivo fonte. A CLI extrai o core embutido em `truxt_core/` dentro desse projeto e usa dependência Cargo relativa. Arquivos embutidos idênticos são reutilizados; alterações nessa cópia extraída são sobrescritas no próximo comando. Cada execução da CLI recebe um arquivo `.truxt`; projetos com vários arquivos ainda não são suportados.
+Os projetos e artefatos Cargo ficam em `.truxt_cache/<nome-da-entrada>/`, ao lado da entrada. A CLI extrai o core em `truxt_core/` nesse projeto e usa dependência Cargo relativa. `main.rs`, `Cargo.toml` e core só são gravados quando seus bytes mudam. Alterações no core extraído são sobrescritas no próximo comando. Isso evita reescritas desnecessárias; carregamento de módulos, análise, codegen e Cargo continuam executando a cada chamada, portanto não é cache completo por chave de conteúdo.
+
+## Módulos de arquivos
+
+Importe outra fonte Truxt no topo:
+
+```truxt
+import module "lib/math.truxt";
+console.log(double(21));
+```
+
+`lib/math.truxt` pode declarar a função:
+
+```truxt
+function double(value: int): int { return value * 2; }
+```
+
+Caminhos são relativos ao arquivo importador e exigem `.truxt`. Imports são recursivos; cada caminho canônico entra uma vez, permitindo repetições e ciclos. Somente a entrada pode conter statements executáveis de topo. Módulos importados podem declarar funções, interfaces, imports Rust FFI e outros módulos. Declarações compartilham namespace global; duplicatas geram erro com labels nos dois arquivos. Ainda não há aliases, namespaces de módulo, exports ou manifesto de projeto. A sintaxe Rust `import function ... from ...` não mudou.
+
+Execute `truxt run examples/modules/main.truxt` para imports relativos/transitivos, FFI, tipos compartilhados e ciclos incluindo a entrada. Consulte o [contrato de módulos](docs/modules.pt-BR.md) para identidade de fonte e limites exatos.
+
+## Diagnósticos de fonte
+
+Erros léxicos, sintáticos e semânticos usam relatórios Ariadne com caminho da fonte, mensagem, trecho, label principal e label relacionado quando o compilador fornece span secundário. Spans de bytes UTF-8 são mostrados na posição de caractere correta, incluindo spans EOF vazios. Erros de fonte mantêm código de saída `1`.
+
+Cores só são ativadas quando stderr é um terminal interativo e podem ser desligadas com `NO_COLOR`; saídas redirecionadas não incluem cores ANSI. Diagnósticos Cargo/rustc continuam sendo os relatórios do Cargo sobre o Rust gerado, sem remapeamento para Truxt. Consulte [diagnósticos e arquivos gerados](docs/diagnostics-and-build.pt-BR.md) para o contrato da implementação.
 
 ## Escopo da linguagem e da interoperabilidade
 
@@ -95,7 +124,19 @@ import function trim(value: string): string from "truxt_core::interop::string_tr
 import function contem(values: int[], value: int): boolean from "truxt_core::interop::array_contains_int";
 ```
 
-Os adaptadores também oferecem `string_len` e `array_contains_number`, `array_contains_boolean` e `array_contains_string`. Os helpers com callbacks (`map`, `filter` e `find`) continuam exclusivos do Rust porque Truxt ainda não oferece closures. Consulte o [guia da biblioteca core](stdlib/truxt_core/README.pt-BR.md) para a API completa.
+Os adaptadores também oferecem `string_len` e `array_contains_number`, `array_contains_boolean` e `array_contains_string`. Os helpers com callbacks (`map`, `filter` e `find`) continuam exclusivos do Rust porque o subconjunto de closures locais ainda não aceita tipos de função higher-order ou FFI. Consulte o [guia da biblioteca core](stdlib/truxt_core/README.pt-BR.md) para a API completa.
+
+## Valores opcionais
+
+Use `T?`, `null` contextual e `option.some(value)` explícito:
+
+```truxt
+const absent: int? = null;
+const present = option.some(7);
+console.log(absent ?? present ?? 9);
+```
+
+`??` avalia a esquerda uma vez e o fallback somente na ausência. `T? ?? T` retorna `T`; `T? ?? T?` continua opcional. `option.is_some` testa e `option.unwrap` clona o payload presente; unwrap na ausência causa panic. `int?[]` é array de opcionais; `int[]?` é array opcional. Campos `T?` continuam obrigatórios. Não há lift implícito, ausência `undefined`, narrowing, campos omitíveis ou Option no FFI. Consulte o [contrato exato](docs/option.pt-BR.md), incluindo limites de inferência e parênteses entre operadores.
 
 ## Entrada e arquivos
 
@@ -131,11 +172,10 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 
 ## Limitações atuais
 
-- Um arquivo por execução da CLI; ainda não há manifesto de projeto nem sistema de módulos com vários arquivos.
-- Não há cache indexado pelo conteúdo. Os artefatos incrementais do próprio Cargo são reutilizados.
-- A análise de ownership é conservadora e rejeita alguns padrões complexos de aliasing. Ainda não há análise CFG/liveness nem otimização de move no último uso.
-- Métodos/`impl`, funções arrow/closures em Truxt, tipos opcionais, `??`, template strings, unions e `try/catch` não foram implementados.
-- Os diagnósticos de fonte são texto simples, sem relatórios Ariadne.
+- Uma entrada por execução da CLI, com imports relativos explícitos; sem manifesto, namespaces de módulo ou aliases.
+- Não há cache completo por chave de conteúdo. Arquivos gerados idênticos são preservados e Cargo reutiliza seus artefatos; análise/codegen continuam executando a cada chamada.
+- A análise de ownership continua conservadora e rejeita alguns padrões complexos de aliasing. Uma passagem privada CFG/liveness remove somente clones comprovadamente de último uso de locais owned diretos; valores emprestados, projeções, usos repetidos no statement e argumentos `ByClone` mantêm cópias. Consulte o [contrato da otimização](docs/liveness.pt-BR.md).
+- Métodos nominais/`impl`, arrow closures locais com snapshot e interpolação de primitivos estão implementados; veja [contratos e limites](docs/methods-closures-templates.pt-BR.md). Unions e `try/catch` continuam pendentes. Option fica fora do FFI e campos opcionais não podem ser omitidos.
 - Result usa `is_ok` e unwrap com cópia; construtores, matching e propagação automática de erros não foram implementados.
 
 ## Exemplos e testes
@@ -146,6 +186,10 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 - `examples/stdlib.truxt` — comprimentos, pertinência, texto Unicode e trim compatíveis com FFI.
 - `examples/io.truxt` — argumentos, stdin e leitura/escrita de arquivos UTF-8.
 - `examples/registry.truxt` — import de `num-integer` 0.1.46 com versão exata.
+- `examples/modules/main.truxt` — módulos recursivos, declarações globais, imports repetidos e ciclos.
+- `examples/liveness.truxt` — último uso, joins, retornos, loops e reatribuição validados com compilação Rust.
+- `examples/methods-closures-templates.truxt` — mutação do receiver, captures snapshot, templates aninhados e ordem de avaliação.
+- `examples/option.truxt` — opcionais, fallbacks encadeados preguiçosos e efeitos exatamente uma vez.
 
 Execute a suíte do workspace com:
 

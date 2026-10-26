@@ -14,6 +14,52 @@ fn lower(source: &str) -> HirProgram {
 }
 
 #[test]
+fn emits_owned_option_snapshots_and_a_lazy_match_fallback() {
+    let rust = emit_rust(&lower(
+        r#"
+        const absent: int? = null;
+        const present = option.some(7);
+        const value = absent ?? present ?? 9;
+        console.log(option.is_some(present));
+        console.log(option.unwrap(present));
+        console.log(value);
+    "#,
+    ));
+    assert!(rust.contains("::std::option::Option::<i64>::None"));
+    assert!(rust.contains("::std::option::Option::Some(7_i64)"));
+    assert!(rust.contains("match __truxt_tmp_"), "{rust}");
+    assert!(rust.contains("::std::option::Option::None =>"));
+    assert!(rust.contains(".is_some()"));
+    assert!(rust.contains("option.unwrap called on None"));
+    assert!(!rust.contains("unwrap_or("));
+}
+
+#[test]
+fn emits_last_use_move_decisions_without_reinferring_ownership() {
+    let moved = emit_rust(&lower(
+        r#"const source = "a"; const copy = source; console.log(copy);"#,
+    ));
+    assert!(
+        moved.contains("let __truxt_binding_1 = __truxt_binding_0;"),
+        "{moved}"
+    );
+    let cloned = emit_rust(&lower(
+        r#"const source = "a"; const copy = source; console.log(source); console.log(copy);"#,
+    ));
+    assert!(
+        cloned.contains("let __truxt_binding_1 = (__truxt_binding_0).clone();"),
+        "{cloned}"
+    );
+    let by_clone = emit_rust(&lower(
+        r#"function take(value: string): string { return value; } const source = "a"; const copy = take(source);"#,
+    ));
+    assert!(
+        by_clone.contains(".clone()"),
+        "ByClone call must stay cloned: {by_clone}"
+    );
+}
+
+#[test]
 fn emits_result_return_types_and_non_consuming_inspection() {
     let hir = lower(
         r#"
@@ -131,6 +177,7 @@ fn emits_manifest_with_safe_normalized_name_and_own_workspace() {
     let manifest = emit_cargo_manifest("Demo Truxt_42!");
 
     assert!(manifest.contains("name = \"demo-truxt-42\""));
+    assert!(manifest.contains("rust-version = \"1.94.1\""));
     assert!(manifest.contains("[workspace]"));
     assert!(manifest.contains("name = \"truxt_program\""));
     assert!(manifest.contains("path = \"src/main.rs\""));

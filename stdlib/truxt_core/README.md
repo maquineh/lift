@@ -1,5 +1,7 @@
 # `truxt_core`
 
+Rust/Cargo **1.94.1+** (MSRV: `1.94.1`).
+
 `truxt_core` is the Rust-native base library for Truxt. It has no external dependencies and provides console output plus array and string helpers.
 
 ## Use from Truxt
@@ -61,7 +63,7 @@ The Rust API is broader than the Truxt FFI surface:
 - `array` provides `len`, `is_empty`, `contains`, `map`, `filter`, and `find` over borrowed slices.
 - `string` provides `len`, `is_empty`, `contains`, `concat`, and `trim`.
 - `io` provides `arguments`, `read_stdin`, `read_file`, and `write_file`, all returning `Result<_, String>`.
-- `map`, `filter`, and `find` accept `FnMut` callbacks. They are not importable from Truxt until the language supports closures and the FFI contract supports their return types.
+- `map`, `filter`, and `find` accept `FnMut` callbacks. Truxt's local snapshot closures have no higher-order function type or FFI mapping, so these helpers remain Rust-only.
 
 `string::len` counts Unicode scalar values; for example, `"é🙂"` has length 2. `string::trim` returns a borrowed `&str` in Rust. The FFI adapter `interop::string_trim` returns an owned `String` to match Truxt's current string-return contract.
 

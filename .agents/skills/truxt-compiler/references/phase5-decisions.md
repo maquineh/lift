@@ -1,9 +1,9 @@
 # Decisões do MVP da Fase 5: imports/FFI e console.log
 
-Este incremento implementa apenas imports explícitos de funções Rust e o binding
-de `console.log`. Métodos gerais, closures, generics na sintaxe Truxt, template
-strings, imports dinâmicos, structs FFI, unsafe e outros recursos do roadmap
-continuam fora do escopo.
+O incremento original implementou imports explícitos de funções Rust e o binding
+de `console.log`. O incremento posterior de métodos nominais, closures locais
+snapshot e templates está em `methods-closures-templates-decisions.md`. Generics
+gerais, callbacks FFI, imports dinâmicos, structs FFI e unsafe continuam fora.
 
 ## Sintaxe e resolução
 
@@ -44,7 +44,7 @@ console.log(concat("Olá, ", "Truxt"));
 | void | proibido | () |
 
 Arrays de string usam `&[String]`/`Vec<String>`; arrays aninhados, structs e
-optionals não integram o contrato FFI. Os argumentos HIR usam `ByValue` para
+Option/T? não integra o FFI em nenhuma posição, inclusive retornos e dentro de Array/Result. Os argumentos HIR usam `ByValue` para
 scalars e `ByRef` para strings/arrays. Retornos são owned. O fluxo existente de
 ownership/clones continua aplicável aos valores retornados.
 
@@ -65,10 +65,11 @@ Rust genérica compatível pode ocorrer em Rust; não há sintaxe de generics Tr
 - Apenas a chamada `console.log(expr)` com um argumento int, number, boolean ou
   string é builtin. O objeto `console` deve estar livre de bindings, funções e
   tipos declarados com esse nome. Um objeto local `console` continua sujeito
-  às regras comuns, que não implementam chamadas de métodos.
+  às regras comuns, inclusive métodos nominais do incremento posterior.
 - O HIR usa `HirExprKind::Call` com nome reservado `console.log`, tipo `void`
   e argumento `ByRef`. Assim walkers de chamadas/ownership existentes continuam
-  a percorrer a expressão; métodos gerais não são introduzidos.
+  a percorrer a expressão. O binding console não depende de métodos gerais;
+  métodos nominais seguem methods-closures-templates-decisions.md.
 - O codegen emite `::truxt_core::Console::log(&arg).expect(...)`, com reborrow
   quando necessário. A expressão é avaliada uma vez e seu valor não é movido.
   O binding `console.log` mantém a política fail-fast em falha de stdout e não

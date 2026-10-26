@@ -9,6 +9,7 @@
 
 mod analyzer;
 mod interop;
+mod liveness;
 
 use std::{error::Error, fmt};
 
@@ -20,6 +21,7 @@ pub use analyzer::analyze;
 /// [`ParameterPassMode`] e [`ArgPassMode`], nunca como tipos de expressão.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ResolvedType {
+    Closure(Vec<ResolvedType>, Box<ResolvedType>),
     Int,
     Number,
     String,
@@ -27,6 +29,7 @@ pub enum ResolvedType {
     Void,
     Struct(String),
     Array(Box<ResolvedType>),
+    Optional(Box<ResolvedType>),
     Result(Box<ResolvedType>, Box<ResolvedType>),
 }
 
@@ -36,9 +39,12 @@ impl ResolvedType {
     }
 
     pub fn is_value_type(&self) -> bool {
-        !matches!(self, Self::Void)
+        !matches!(self, Self::Void | Self::Closure(..))
             && match self {
                 Self::Array(element) => element.is_value_type(),
+                Self::Optional(element) => {
+                    element.is_value_type() && !matches!(**element, Self::Optional(_))
+                }
                 Self::Result(ok, error) => {
                     (**ok == Self::Void || ok.is_value_type()) && error.is_value_type()
                 }
@@ -50,6 +56,7 @@ impl ResolvedType {
 impl fmt::Display for ResolvedType {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Closure(_, _) => formatter.write_str("closure"),
             Self::Int => formatter.write_str("int"),
             Self::Number => formatter.write_str("number"),
             Self::String => formatter.write_str("string"),
@@ -57,6 +64,7 @@ impl fmt::Display for ResolvedType {
             Self::Void => formatter.write_str("void"),
             Self::Struct(name) => formatter.write_str(name),
             Self::Array(element) => write!(formatter, "{element}[]"),
+            Self::Optional(element) => write!(formatter, "{element}?"),
             Self::Result(ok, error) => write!(formatter, "Result<{ok}, {error}>"),
         }
     }
@@ -121,6 +129,8 @@ pub const CONSOLE_LOG_BUILTIN: &str = "console.log";
 pub const RESULT_IS_OK_BUILTIN: &str = "result.is_ok";
 pub const RESULT_UNWRAP_BUILTIN: &str = "result.unwrap";
 pub const RESULT_UNWRAP_ERR_BUILTIN: &str = "result.unwrap_err";
+pub const OPTION_IS_SOME_BUILTIN: &str = "option.is_some";
+pub const OPTION_UNWRAP_BUILTIN: &str = "option.unwrap";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HirStruct {
@@ -259,10 +269,30 @@ pub struct HirExpr {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HirExprKind {
+    /// Captures are owned snapshots evaluated at construction, outside the body CFG.
+    Closure {
+        captures: Vec<(BindingId, HirExpr)>,
+        parameters: Vec<HirParameter>,
+        body: HirBlock,
+    },
+    ClosureCall {
+        callee: Box<HirExpr>,
+        arguments: Vec<HirExpr>,
+    },
     IntegerLiteral(i64),
     NumberLiteral(f64),
     StringLiteral(String),
     BooleanLiteral(bool),
+    OptionNone,
+    /// Payload is already materialized as owned; PT-BR: payload já é owned.
+    OptionSome(Box<HirExpr>),
+    /// Both operands are owned; fallback executes only for None.
+    /// PT-BR: Ambos são owned; fallback executa somente para None.
+    Coalesce {
+        option: Box<HirExpr>,
+        fallback: Box<HirExpr>,
+        mode: CoalesceMode,
+    },
     Local {
         id: BindingId,
         name: String,
@@ -300,6 +330,15 @@ pub enum HirExprKind {
         expression: Box<HirExpr>,
         mode: CloneMode,
     },
+    /// Proven last use of a direct owned local; codegen emits its binding.
+    /// PT-BR: Último uso comprovado de local owned; codegen emite o binding.
+    Move(Box<HirExpr>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoalesceMode {
+    Value,
+    Optional,
 }
 
 /// Forma de materializar um place não `Copy` em um valor Truxt owned.

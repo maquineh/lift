@@ -10,16 +10,24 @@
 use std::{error::Error, fmt, ops::Range};
 
 use logos::{Lexer, Logos};
-use truxt_ast::Span;
+use truxt_ast::{SourceId, Span};
 
 /// Converte a fonte em tokens ordenados e seus spans.
 ///
 /// A primeira falha lexical interrompe a tokenização e retorna o span do erro.
 pub fn tokenize(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
+    tokenize_with_source(source, SourceId(0))
+}
+
+/// Tokenizes one named source; PT-BR: tokeniza preservando a identidade da fonte.
+pub fn tokenize_with_source(
+    source: &str,
+    source_id: SourceId,
+) -> Result<Vec<(Token, Span)>, LexError> {
     let mut result = Vec::new();
 
     for (token, range) in Token::lexer(source).spanned() {
-        let span = Span::from(range.clone());
+        let span = Span::from(range.clone()).with_source(source_id);
         match token {
             Ok(Token::UnterminatedBlockComment) => {
                 return Err(LexError {
@@ -27,8 +35,15 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
                     span,
                 });
             }
-            Ok(token) => result.push((token, span)),
-            Err(kind) => return Err(classify_error(source, kind, range)),
+            Ok(mut token) => {
+                relocate_template(&mut token, 0, source_id);
+                result.push((token, span));
+            }
+            Err(kind) => {
+                let mut error = classify_error(source, kind, range);
+                error.span = error.span.with_source(source_id);
+                return Err(error);
+            }
         }
     }
 
@@ -37,6 +52,7 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, Span)>, LexError> {
 
 fn classify_error(source: &str, error: LogosErrorKind, range: Range<usize>) -> LexError {
     let kind = match error {
+        LogosErrorKind::UnterminatedTemplate => LexErrorKind::UnterminatedTemplate,
         LogosErrorKind::UnexpectedCharacter => {
             if let Some(end) = unterminated_string_end(source, range.start) {
                 return LexError {
@@ -90,6 +106,10 @@ fn unterminated_string_end(source: &str, start: usize) -> Option<usize> {
 #[logos(skip(r"//[^\r\n]*", allow_greedy = true))]
 #[logos(skip(r"(?s:/\*.*?\*/)"))]
 pub enum Token {
+    #[token("impl")]
+    Impl,
+    #[token("`", template_contents)]
+    TemplateLiteral(Vec<TemplatePart>),
     // Palavras-chave e tipos primitivos.
     #[token("function")]
     Function,
@@ -111,6 +131,8 @@ pub enum Token {
     While,
     #[token("return")]
     Return,
+    #[token("null")]
+    Null,
     #[token("int")]
     IntType,
     #[token("number")]
@@ -208,6 +230,80 @@ pub enum Token {
     UnterminatedBlockComment,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum TemplatePart {
+    Text(String),
+    Expression(Vec<(Token, Span)>),
+}
+
+fn relocate_template(token: &mut Token, offset: usize, source: SourceId) {
+    if let Token::TemplateLiteral(parts) = token {
+        for part in parts {
+            if let TemplatePart::Expression(tokens) = part {
+                for (token, span) in tokens {
+                    span.start += offset;
+                    span.end += offset;
+                    span.source = source;
+                    relocate_template(token, offset, source);
+                }
+            }
+        }
+    }
+}
+
+fn template_contents(lexer: &mut Lexer<'_, Token>) -> Result<Vec<TemplatePart>, LogosErrorKind> {
+    let base = lexer.span().end;
+    let source = lexer.remainder();
+    let mut cursor = 0;
+    let mut text_start = 0;
+    let mut parts = Vec::new();
+    while cursor < source.len() {
+        let c = source[cursor..].chars().next().unwrap();
+        if c == '\\' {
+            cursor += 1;
+            if cursor < source.len() {
+                cursor += source[cursor..].chars().next().unwrap().len_utf8();
+            }
+        } else if c == '`' {
+            parts.push(TemplatePart::Text(source[text_start..cursor].into()));
+            lexer.bump(cursor + 1);
+            return Ok(parts);
+        } else if source[cursor..].starts_with("${") {
+            parts.push(TemplatePart::Text(source[text_start..cursor].into()));
+            cursor += 2;
+            let expression_start = cursor;
+            let mut tokens = Vec::new();
+            let mut depth = 0;
+            let mut closed = false;
+            for (token, range) in Token::lexer(&source[expression_start..]).spanned() {
+                let mut token = token?;
+                if token == Token::RightBrace && depth == 0 {
+                    cursor = expression_start + range.end;
+                    closed = true;
+                    break;
+                }
+                if token == Token::LeftBrace {
+                    depth += 1;
+                }
+                if token == Token::RightBrace {
+                    depth -= 1;
+                }
+                let offset = base + expression_start;
+                relocate_template(&mut token, offset, SourceId(0));
+                tokens.push((token, Span::new(offset + range.start, offset + range.end)));
+            }
+            if !closed {
+                return Err(LogosErrorKind::UnterminatedTemplate);
+            }
+            parts.push(TemplatePart::Expression(tokens));
+            text_start = cursor;
+        } else {
+            cursor += c.len_utf8();
+        }
+    }
+    Err(LogosErrorKind::UnterminatedTemplate)
+}
+
 fn parse_number(lexer: &mut Lexer<'_, Token>) -> Result<f64, LogosErrorKind> {
     let number = lexer
         .slice()
@@ -228,6 +324,7 @@ fn string_contents(lexer: &mut Lexer<'_, Token>) -> String {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[doc(hidden)]
 pub enum LogosErrorKind {
+    UnterminatedTemplate,
     #[default]
     UnexpectedCharacter,
     IntegerOutOfRange,
@@ -237,6 +334,7 @@ pub enum LogosErrorKind {
 /// Categoria pública de uma falha lexical.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LexErrorKind {
+    UnterminatedTemplate,
     UnexpectedCharacter,
     UnterminatedString,
     UnterminatedBlockComment,
@@ -254,6 +352,7 @@ pub struct LexError {
 impl fmt::Display for LexError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self.kind {
+            LexErrorKind::UnterminatedTemplate => "template não terminado",
             LexErrorKind::UnexpectedCharacter => "caractere inesperado",
             LexErrorKind::UnterminatedString => "literal de string não terminado",
             LexErrorKind::UnterminatedBlockComment => "comentário de bloco não terminado",
@@ -466,5 +565,17 @@ mod tests {
 
         assert_eq!(error.kind, LexErrorKind::NumberOutOfRange);
         assert_eq!(error.span, Span::new(0, 5));
+    }
+}
+#[test]
+fn source_aware_tokenization_preserves_ids_on_tokens_and_errors() {
+    let id = SourceId(11);
+    let tokens = tokenize_with_source("const texto = \"á🙂\";", id).unwrap();
+    assert!(tokens.iter().all(|(_, span)| span.source == id));
+    for source in ["@", "\"unterminated", "/* open", "184467440737095516160"] {
+        assert_eq!(
+            tokenize_with_source(source, id).unwrap_err().span.source,
+            id
+        );
     }
 }

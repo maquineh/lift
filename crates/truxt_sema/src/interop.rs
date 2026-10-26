@@ -11,6 +11,13 @@ pub(crate) fn validate_type(
     returning: bool,
     span: Span,
 ) -> Result<(), SemaError> {
+    if contains_optional(ty) {
+        return Err(SemaError::new(
+            SemaErrorKind::UnsupportedType,
+            "Option/T? não é suportado no FFI",
+            span,
+        ));
+    }
     let primitive = |ty: &ResolvedType| {
         matches!(
             ty,
@@ -35,6 +42,15 @@ pub(crate) fn validate_type(
             "FFI aceita primitivos, arrays de primitivos, retorno void e retorno Result<T, E>",
             span,
         ))
+    }
+}
+
+fn contains_optional(ty: &ResolvedType) -> bool {
+    match ty {
+        ResolvedType::Optional(_) => true,
+        ResolvedType::Array(element) => contains_optional(element),
+        ResolvedType::Result(ok, error) => contains_optional(ok) || contains_optional(error),
+        _ => false,
     }
 }
 
