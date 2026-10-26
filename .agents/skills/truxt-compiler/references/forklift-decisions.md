@@ -2,7 +2,7 @@
 
 Contratos bilíngues: `docs/forklift.md` / `docs/forklift.pt-BR.md`.
 
-- `truxt.toml`: package name/version/kind/entry obrigatórios; dependências apenas
+- `lift.toml`: package name/version/kind/entry obrigatórios; dependências apenas
   `{path="..."}` relativas ao manifesto. Identidade é manifesto canônico, não
   alias/nome/versão. Kinds bin/lib; dependências devem ser lib; ciclos de pacote
   rejeitados. Nome/versão são metadados não vazios, sem resolução semver.
@@ -28,8 +28,8 @@ Contratos bilíngues: `docs/forklift.md` / `docs/forklift.pt-BR.md`.
   verifica tipos; check aceita lib, build/run exigem bin. Reusa snapshot uma vez.
   Init normaliza nome ASCII e usa staging/hardlink sem sobrescrita, com rollback
   em falha de publicação; não é transação indivisível de dois arquivos.
-- Pacotes Truxt viram um HIR/programa Cargo; crates Rust FFI continuam dependências
-  Cargo. Conflitos de versão FFI entre pacotes são erro sema. Sem registry Truxt,
+- Pacotes Lift viram um HIR/programa Cargo; crates Rust FFI continuam dependências
+  Cargo. Conflitos de versão FFI entre pacotes são erro sema. Sem registry Lift,
   rede do resolvedor, lockfile Forklift, remotos ou instalação automática.
 - Exemplo `examples/packages/app` e contratos cobrem namespaces/privacidade,
   tipos nominais privados homônimos, transitive BorrowMut, captures/liveness,

@@ -1,0 +1,44 @@
+name: Lift notes contracts
+on: [push, pull_request]
+jobs:
+  notes:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - run: cargo test --locked --workspace
+      - run: cargo test --manifest-path stdlib/lift_db/Cargo.toml
+      - run: python scripts/verify_notes.py
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: lift
+          POSTGRES_PASSWORD: lift_test
+          POSTGRES_DB: lift_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lift -d lift_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      LIFT_TEST_POSTGRES_URL: postgres://lift:lift_test@127.0.0.1:5432/lift_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - run: cargo test --manifest-path stdlib/lift_db/Cargo.toml --test api_contract -- --ignored postgres_general_api_contract
+      - run: python scripts/verify_notes.py --postgres

@@ -2,7 +2,7 @@
 
 [English](liveness.md) · [Guia de uso](../README.pt-BR.md)
 
-Após a análise semântica aprovar o programa, uma passagem privada monta CFG por função e para o script de entrada. Ela não altera sintaxe, conjunto aceito, modos de parâmetros, diagnósticos de aliasing ou a semântica de cópia de valores do Truxt. Pode remover uma cópia redundante quando o valor owned original não será mais necessário.
+Após a análise semântica aprovar o programa, uma passagem privada monta CFG por função e para o script de entrada. Ela não altera sintaxe, conjunto aceito, modos de parâmetros, diagnósticos de aliasing ou a semântica de cópia de valores do Lift. Pode remover uma cópia redundante quando o valor owned original não será mais necessário.
 
 Cada statement simples e cada condição `if`/`while` possui um ponto. Ramos convergem na continuação real; `return` não tem sucessor. Loops incluem backedge para a condição e saída de zero iterações. Liveness reversa calcula `live_out = união(live_in(sucessores))` e `live_in = usos ∪ (live_out − defs)` até ponto fixo. Rebinding direto mata o valor anterior; mutação de campo/índice não mata sua raiz. Chamadas usam conservadoramente todos os argumentos.
 
@@ -14,4 +14,4 @@ A prova tem granularidade de statement. Não prova último uso geral dentro de q
 
 O incremento Option observa payloads e ambos os operandos de coalesce como usos possíveis, mantendo clones internos a Some/Coalesce. Isso preserva liveness conservadora ao redor do fallback condicional; consulte [Option](option.pt-BR.md).
 
-Testes cobrem cópias elegíveis em funções/script, usos posteriores, joins if/else/else-if, returns terminais, ponto fixo/zero iterações, reatribuição, repetições, parâmetros emprestados, projeções e `ByClone` preservado. A CLI passa `examples/liveness.truxt` por check/build/run e confere stdout do executável nativo. A evidência cobre os casos exercitados, sem alegar prova geral de Borrow Checker.
+Testes cobrem cópias elegíveis em funções/script, usos posteriores, joins if/else/else-if, returns terminais, ponto fixo/zero iterações, reatribuição, repetições, parâmetros emprestados, projeções e `ByClone` preservado. A CLI passa `examples/liveness.lift` por check/build/run e confere stdout do executável nativo. A evidência cobre os casos exercitados, sem alegar prova geral de Borrow Checker.

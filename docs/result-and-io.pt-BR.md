@@ -2,14 +2,14 @@
 
 [English](result-and-io.md) · [Guia de uso](../README.pt-BR.md)
 
-`Result<T, E>` é um tipo especial embutido, convertido para `std::result::Result<T, E>` do Rust. É aceito em anotações de variáveis, campos de interfaces, arrays e parâmetros/retornos de funções Truxt. Tipos Result aninhados são aceitos em Truxt. Isso não adiciona tipos genéricos gerais.
+`Result<T, E>` é um tipo especial embutido, convertido para `std::result::Result<T, E>` do Rust. É aceito em anotações de variáveis, campos de interfaces, arrays e parâmetros/retornos de funções Lift. Tipos Result aninhados são aceitos em Lift. Isso não adiciona tipos genéricos gerais.
 
 `void` pode ser o tipo de sucesso (`Result<void, string>` → `Result<(), String>`). Continua inválido como erro, elemento de array, variável isolada ou parâmetro comum. Ciclos diretos de structs por Result são rejeitados como os ciclos por campo direto; uma indireção por array continua quebrando esse ciclo de tamanho.
 
 ## Tratar um resultado
 
-```truxt
-import function read_file(path: string): Result<string, string> from "truxt_core::io::read_file";
+```lift
+import function read_file(path: string): Result<string, string> from "lift_core::io::read_file";
 
 const contents: Result<string, string> = read_file("input.txt");
 if result.is_ok(contents) {
@@ -21,7 +21,7 @@ if result.is_ok(contents) {
 
 `result.is_ok(value)` empresta o Result e retorna `boolean`. `result.unwrap(value)` retorna uma cópia própria do valor de sucesso; `result.unwrap_err(value)` retorna uma cópia própria do erro. O payload é clonado, preservando o Result original. Um unwrap de sucesso de `Result<void, E>` é uma expressão void utilizável como statement. Cada expressão de argumento é avaliada uma vez.
 
-Unwrap na variante errada causa panic. O compilador não prova que o ramo verificou a variante; use `is_ok` adequadamente. O namespace `result` não pode estar sombreado. Result continua sem construtores: valores vêm de imports ou funções Truxt. Pattern matching, operador de propagação `?`, `try/catch`, unions e generics gerais continuam pendentes. Tipos opcionais e `??` seguem o [contrato separado de Option](option.pt-BR.md).
+Unwrap na variante errada causa panic. O compilador não prova que o ramo verificou a variante; use `is_ok` adequadamente. O namespace `result` não pode estar sombreado. Result continua sem construtores: valores vêm de imports ou funções Lift. Pattern matching, operador de propagação `?`, `try/catch`, unions e generics gerais continuam pendentes. Tipos opcionais e `??` seguem o [contrato separado de Option](option.pt-BR.md).
 
 ## Contrato FFI
 
@@ -29,13 +29,13 @@ Um import pode retornar `Result<T, E>` quando `T` é primitivo suportado, array 
 
 ## Funções da biblioteca
 
-| Destino do import | Retorno Truxt | Comportamento |
+| Destino do import | Retorno Lift | Comportamento |
 | --- | --- | --- |
-| `truxt_core::io::arguments` | `Result<string[], string>` | Exclui argv[0]; preserva ordem, argumentos vazios, flags e espaços. Unicode inválido vira erro. |
-| `truxt_core::io::read_stdin` | `Result<string, string>` | Lê até EOF; preserva quebras de linha; rejeita UTF-8 inválido. |
-| `truxt_core::io::read_file` | `Result<string, string>` | Lê um arquivo UTF-8 inteiro. |
-| `truxt_core::io::write_file` | `Result<void, string>` | Cria ou trunca arquivo UTF-8; não cria diretórios pais. |
+| `lift_core::io::arguments` | `Result<string[], string>` | Exclui argv[0]; preserva ordem, argumentos vazios, flags e espaços. Unicode inválido vira erro. |
+| `lift_core::io::read_stdin` | `Result<string, string>` | Lê até EOF; preserva quebras de linha; rejeita UTF-8 inválido. |
+| `lift_core::io::read_file` | `Result<string, string>` | Lê um arquivo UTF-8 inteiro. |
+| `lift_core::io::write_file` | `Result<void, string>` | Cria ou trunca arquivo UTF-8; não cria diretórios pais. |
 
-Caminhos são strings. Caminhos relativos usam o diretório de trabalho do chamador, preservado por `truxt run`. Mensagens de erro incluem operação, caminho quando aplicável e erro de sistema/UTF-8. Este incremento não oferece códigos de erro estruturados. A escrita não é atômica e uma falha pode deixar arquivo parcial. Os bindings retornam erros em vez de encerrar o processo; unwrap na variante errada e o binding atual de console ainda podem causar panic.
+Caminhos são strings. Caminhos relativos usam o diretório de trabalho do chamador, preservado por `lift run`. Mensagens de erro incluem operação, caminho quando aplicável e erro de sistema/UTF-8. Este incremento não oferece códigos de erro estruturados. A escrita não é atômica e uma falha pode deixar arquivo parcial. Os bindings retornam erros em vez de encerrar o processo; unwrap na variante errada e o binding atual de console ainda podem causar panic.
 
-Use `truxt run app.truxt -- --flag "a b"` para encaminhar flags e argumentos com espaços. O compilador não consome stdin canalizado durante a compilação. Consulte `examples/io.truxt` para tratar erros de leitura/escrita. Testes unitários e de CLI cobrem sucesso, stdin vazio/multilinha, argumentos, arquivos Unicode, truncamento, arquivos/diretórios ausentes, UTF-8 inválido e uso incorreto explícito de unwrap.
+Use `lift run app.lift -- --flag "a b"` para encaminhar flags e argumentos com espaços. O compilador não consome stdin canalizado durante a compilação. Consulte `examples/io.lift` para tratar erros de leitura/escrita. Testes unitários e de CLI cobrem sucesso, stdin vazio/multilinha, argumentos, arquivos Unicode, truncamento, arquivos/diretórios ausentes, UTF-8 inválido e uso incorreto explícito de unwrap.

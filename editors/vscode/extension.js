@@ -1,5 +1,5 @@
-// EN: Small client; all Truxt analysis lives in the Rust project API.
-// PT-BR: Cliente mínimo; toda análise Truxt pertence à API Rust de projeto.
+// EN: Small client; all Lift analysis lives in the Rust project API.
+// PT-BR: Cliente mínimo; toda análise Lift pertence à API Rust de projeto.
 'use strict';
 const vscode = require('vscode');
 const path = require('node:path');
@@ -9,23 +9,23 @@ let watcher;
 let restartQueue = Promise.resolve();
 
 function settings() {
-    const config = vscode.workspace.getConfiguration('truxt');
+    const config = vscode.workspace.getConfiguration('lift');
     const folder = vscode.workspace.workspaceFolders?.[0];
     const configured = config.get('entry', '');
     const entry = configured ? path.resolve(folder?.uri.fsPath || process.cwd(), configured) : undefined;
-    return { command: config.get('serverPath', 'truxt'), folder, entry };
+    return { command: config.get('serverPath', 'lift'), folder, entry };
 }
 
 async function restart(context) {
     if (client) { await client.stop(); await client.dispose(); client = undefined; }
     if (watcher) { watcher.dispose(); }
     const { command, folder, entry } = settings();
-    watcher = vscode.workspace.createFileSystemWatcher('**/{*.truxt,truxt.toml}');
-    const next = new LanguageClient('truxt', 'Truxt', {
+    watcher = vscode.workspace.createFileSystemWatcher('**/{*.lift,lift.toml}');
+    const next = new LanguageClient('lift', 'Lift', {
         command, args: ['lsp'], transport: TransportKind.stdio,
         options: { cwd: folder?.uri.fsPath }
     }, {
-        documentSelector: [{ scheme: 'file', language: 'truxt' }],
+        documentSelector: [{ scheme: 'file', language: 'lift' }],
         initializationOptions: { entry: entry ? vscode.Uri.file(entry).toString() : undefined },
         synchronize: { fileEvents: watcher }
     });
@@ -38,7 +38,7 @@ function task(definition, folder) {
     const { command } = settings();
     const file = path.resolve(folder?.uri.fsPath || process.cwd(), definition.file);
     const execution = new vscode.ProcessExecution(command, [definition.command, file], { cwd: folder?.uri.fsPath });
-    const result = new vscode.Task(definition, folder || vscode.TaskScope.Workspace, `${definition.command} ${path.basename(file)}`, 'Truxt', execution, []);
+    const result = new vscode.Task(definition, folder || vscode.TaskScope.Workspace, `${definition.command} ${path.basename(file)}`, 'Lift', execution, []);
     if (definition.command === 'build') { result.group = vscode.TaskGroup.Build; }
     return result;
 }
@@ -46,19 +46,19 @@ function task(definition, folder) {
 function activate(context) {
     const queueRestart = () => {
         restartQueue = restartQueue.then(() => restart(context)).catch(error => {
-            vscode.window.showErrorMessage(`Truxt server: ${error.message}. Set truxt.serverPath to a built Truxt executable.`);
+            vscode.window.showErrorMessage(`Lift server: ${error.message}. Set lift.serverPath to a built Lift executable.`);
         });
         return restartQueue;
     };
     context.subscriptions.push(
-        vscode.commands.registerCommand('truxt.restartServer', queueRestart),
-        vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('truxt')) { void queueRestart(); } }),
-        vscode.tasks.registerTaskProvider('truxt', {
+        vscode.commands.registerCommand('lift.restartServer', queueRestart),
+        vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('lift')) { void queueRestart(); } }),
+        vscode.tasks.registerTaskProvider('lift', {
             provideTasks() {
                 const { folder, entry } = settings();
                 const active = vscode.window.activeTextEditor?.document;
-                const file = entry || (active?.languageId === 'truxt' && active.uri.scheme === 'file' ? active.uri.fsPath : undefined);
-                return file ? ['check', 'build', 'lint', 'run'].map(command => task({ type: 'truxt', command, file }, folder)) : [];
+                const file = entry || (active?.languageId === 'lift' && active.uri.scheme === 'file' ? active.uri.fsPath : undefined);
+                return file ? ['check', 'build', 'lint', 'run'].map(command => task({ type: 'lift', command, file }, folder)) : [];
             },
             resolveTask(unresolved) {
                 const folder = typeof unresolved.scope === 'object' ? unresolved.scope : settings().folder;

@@ -1,0 +1,9 @@
+[package]
+name = "demo"
+version = "0.1.0"
+kind = "bin"
+entry = "main.lift"
+
+[dependencies]
+math = { path = "../math" }
+text = { path = "../text" }

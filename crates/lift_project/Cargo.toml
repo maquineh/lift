@@ -1,0 +1,14 @@
+[package]
+name = "lift_project"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Reusable Lift project analysis and source diagnostics"
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+lift_ast.workspace = true
+lift_lexer.workspace = true
+lift_parser.workspace = true
+lift_sema.workspace = true

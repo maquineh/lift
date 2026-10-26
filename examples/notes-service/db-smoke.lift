@@ -1,0 +1,17 @@
+import function save_note(path: string, body: string): Result<int, string> from "lift_db::interop::save_note";
+import function list_notes(path: string): Result<string, string> from "lift_db::interop::list_notes";
+
+const database_path = "examples/notes-service/lift-notes-smoke.sqlite3";
+const saved = save_note(database_path, "SQLite via Lift FFI");
+if result.is_ok(saved) {
+    console.log(result.unwrap(saved));
+} else {
+    console.log(result.unwrap_err(saved));
+}
+
+const notes = list_notes(database_path);
+if result.is_ok(notes) {
+    console.log(result.unwrap(notes));
+} else {
+    console.log(result.unwrap_err(notes));
+}

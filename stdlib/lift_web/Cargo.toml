@@ -1,0 +1,13 @@
+[package]
+name = "lift_web"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94.1"
+description = "HTTP adapter for Lift's local notes proof of concept"
+
+[dependencies]
+axum = { version = "0.8", features = ["http1", "tokio"] }
+lift_db = { path = "../lift_db" }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+
+[workspace]

@@ -1,0 +1,10 @@
+[package]
+name = "lift_parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Parser recursivo descendente e Pratt do Lift"
+
+[dependencies]
+lift_ast.workspace = true
+lift_lexer.workspace = true

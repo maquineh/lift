@@ -1,12 +1,12 @@
 # Methods, closures, and templates v1
 
 Rust/Cargo **1.94.1+** is required for the compiler, bundled core, and generated
-projects. This is a defined Truxt subset, not full TypeScript compatibility.
-Run `cargo run -p truxt_cli -- run examples/methods-closures-templates.truxt`.
+projects. This is a defined Lift subset, not full TypeScript compatibility.
+Run `cargo run -p lift_cli -- run examples/methods-closures-templates.lift`.
 
 ## Nominal methods
 
-```truxt
+```lift
 interface Counter { value: int }
 impl Counter {
     add(n: int): int { this.value = this.value + n; return this.value; }
@@ -28,7 +28,7 @@ Semantic lowering creates an internal function with `this` as its first HIR
 argument before ordinary ownership and alias analysis. A read-only receiver is
 borrowed, a mutated receiver is borrowed mutably. Returning `this` produces an
 owned clone, so a mutation still affects the caller's receiver. Arguments follow
-existing Truxt value/copy rules, including cloning owned non-Copy parameters.
+existing Lift value/copy rules, including cloning owned non-Copy parameters.
 Receiver evaluation precedes explicit arguments; established argument staging
 materializes conflicting reads/effects before creating the final borrow.
 `c.add(c.value)` and `c.add(c.add(1))` are supported and compiled in the E2E test;
@@ -42,7 +42,7 @@ another nominal type owns that method.
 
 ## Local arrow closures
 
-```truxt
+```lift
 let text = "before";
 const snapshot = (): string => text;
 text = "after";
@@ -80,7 +80,7 @@ clones instead of borrowing the outer frame or applying outer last-use moves.
 
 ## Template strings
 
-```truxt
+```lift
 console.log(`value ${c.value}, nested ${`ok ${true}`}`);
 console.log(`literal \${text}, tick \` and newline\n`);
 ```
@@ -99,7 +99,7 @@ before mutation and the final value after mutation. HIR uses reserved stringify
 calls borrowing one primitive and ordered String concatenation; Rust uses
 `format!` with a constant format string, so source braces cannot inject a format.
 Formatting follows Rust Display (not all JavaScript/TypeScript number formatting).
-Escapes match ordinary Truxt strings: `\\`, `\"`, `\'`, `\n`, `\r`, `\t`, `\0`;
+Escapes match ordinary Lift strings: `\\`, `\"`, `\'`, `\n`, `\r`, `\t`, `\0`;
 `\`` and `\$` protect a backtick and interpolation opener. Unknown escapes drop
 the backslash. Unicode escape syntax, raw tagged forms, and JS line-continuation
 rules are not implemented; Unicode characters may be written directly.

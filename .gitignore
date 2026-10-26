@@ -1,5 +1,5 @@
 /target/
-**/.truxt_cache/
+**/.lift_cache/
 /dist/
 /editors/vscode/node_modules/
 /editors/vscode/*.vsix
@@ -16,3 +16,17 @@
 /examples/modules/main.exe
 /examples/packages/app/main
 /examples/packages/app/main.exe
+/examples/notes-service/main.exe
+/examples/notes-service/db-smoke.exe
+**/lift-notes.sqlite3
+**/lift-notes-smoke.sqlite3
+**/lift-resources.sqlite3
+/examples/notes-service/resources.exe
+/examples/notes-service/main
+/examples/notes-service/resources
+**/lift-contract.sqlite3
+**/lift-fixture.sqlite3
+/examples/database/contract
+/examples/database/contract.exe
+/examples/database/notes-fixture
+/examples/database/notes-fixture.exe

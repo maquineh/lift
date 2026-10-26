@@ -1,0 +1,16 @@
+[package]
+name = "lift_db"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94.1"
+description = "Synchronous parameterized SQLite/PostgreSQL API and owned pools for Lift"
+
+[dependencies]
+rusqlite = { version = "=0.40.1", features = ["bundled"] }
+r2d2 = "=0.8.10"
+postgres = "=0.19.14"
+postgres-native-tls = "=0.5.3"
+native-tls = "=0.2.18"
+bytes = "=1.12.1"
+
+[workspace]

@@ -3,12 +3,12 @@
 [English](modules.md) · [Guia de uso](../README.pt-BR.md)
 
 Este documento descreve imports flat legados, preservados sem manifesto.
-O [incremento Forklift](forklift.pt-BR.md) acrescenta `truxt.toml`, namespaces
+O [incremento Forklift](forklift.pt-BR.md) acrescenta `lift.toml`, namespaces
 de pacotes e funções exportadas; módulos continuam flat dentro de cada pacote.
 
-`import module "relative.truxt";` é declaração de topo, distinta dos imports Rust FFI. O ponto e vírgula é obrigatório. `module` é contextual nessa posição e continua disponível como identificador comum. Imports aninhados, aliases, namespaces, exports, busca de pacotes e manifesto ficam fora deste incremento.
+`import module "relative.lift";` é declaração de topo, distinta dos imports Rust FFI. O ponto e vírgula é obrigatório. `module` é contextual nessa posição e continua disponível como identificador comum. Imports aninhados, aliases, namespaces, exports, busca de pacotes e manifesto ficam fora deste incremento.
 
-Cada caminho é relativo ao arquivo importador, independentemente do diretório de trabalho do chamador. Exige extensão `.truxt`, sem distinção de maiúsculas como na entrada da CLI. Caminhos absolutos/enraizados ou com prefixo de drive são rejeitados. `..` é permitido. O especificador usa o texto literal do token, sem interpolação ou decodificação de escapes de strings de runtime; use `/` para portabilidade.
+Cada caminho é relativo ao arquivo importador, independentemente do diretório de trabalho do chamador. Exige extensão `.lift`, sem distinção de maiúsculas como na entrada da CLI. Caminhos absolutos/enraizados ou com prefixo de drive são rejeitados. `..` é permitido. O especificador usa o texto literal do token, sem interpolação ou decodificação de escapes de strings de runtime; use `/` para portabilidade.
 
 A CLI canonicaliza e deduplica arquivos antes de seguir seus imports. Cada fonte canônica é lida/parseada uma vez na compilação. A marcação ocorre antes da recursão, permitindo repetições, ciclos entre módulos e retorno ao arquivo de entrada sem duplicar declarações ou executar statements root novamente. Imports não têm etapa de execução em runtime.
 
@@ -32,4 +32,4 @@ A CLI mantém tabela de caminhos canônicos e textos UTF-8. Spans AST/HIR preser
 
 O grafo produz um programa tipado, uma fonte Rust e um executável no cache da entrada. Reuso de bytes gerados e incremental do Cargo continuam. O grafo inteiro é carregado/analisado em cada comando; não é cache de hashes de dependências. Uma mudança transitiva afeta o próximo comando mesmo com entrada inalterada.
 
-`examples/modules/main.truxt` exercita interfaces/funções compartilhadas, FFI em módulo, imports relativos/transitivos, caminhos repetidos, ciclos entre módulos e ciclo pela entrada. Testes conferem stdout e execução única do root, mudança transitiva, statements proibidos, erros UTF-8/EOF importados, labels cruzados, caminhos inválidos e módulos vazios. Não há suporte a carregamento dinâmico ou compilação separada.
+`examples/modules/main.lift` exercita interfaces/funções compartilhadas, FFI em módulo, imports relativos/transitivos, caminhos repetidos, ciclos entre módulos e ciclo pela entrada. Testes conferem stdout e execução única do root, mudança transitiva, statements proibidos, erros UTF-8/EOF importados, labels cruzados, caminhos inválidos e módulos vazios. Não há suporte a carregamento dinâmico ou compilação separada.

@@ -1,0 +1,27 @@
+// EN: Explicit Rust imports with borrowed strings and arrays.
+// PT-BR: Imports Rust explícitos com strings e arrays emprestados.
+import function concat(left: string, right: string): string from "lift_core::string::concat";
+import function is_empty(values: int[]): boolean from "lift_core::array::is_empty";
+import function strings_are_empty(values: string[]): boolean from "lift_core::array::is_empty";
+
+function greeting(name: string): string {
+    return concat("Olá, ", name);
+}
+
+function echo(name: string): void {
+    console.log(name);
+}
+
+const name = "Lift";
+console.log(greeting(name));
+console.log(name);
+console.log(42);
+console.log(2.5);
+console.log(true);
+const values: int[] = [1, 2];
+console.log(is_empty(values));
+const labels: string[] = ["Lift"];
+console.log(strings_are_empty(labels));
+console.log(values[0]);
+console.log(labels[0]);
+echo(name);

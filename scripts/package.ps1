@@ -18,18 +18,18 @@ try {
     $metadataText = & cargo metadata --no-deps --format-version 1 --locked
     if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed / falhou" }
     $metadata = $metadataText | ConvertFrom-Json
-    $version = ($metadata.packages | Where-Object { $_.name -eq "truxt_cli" }).version
+    $version = ($metadata.packages | Where-Object { $_.name -eq "lift_cli" }).version
     $targetDirectory = Join-Path $projectRoot "target"
-    & cargo build --release --locked -p truxt_cli --target $hostTriple --target-dir $targetDirectory
+    & cargo build --release --locked -p lift_cli --target $hostTriple --target-dir $targetDirectory
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed / falhou" }
 
     $isWindowsHost = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
-    $executableName = if ($isWindowsHost) { "truxt.exe" } else { "truxt" }
+    $executableName = if ($isWindowsHost) { "lift.exe" } else { "lift" }
     $executable = Join-Path $targetDirectory "$hostTriple/release/$executableName"
     $forkliftName = if ($isWindowsHost) { "forklift.exe" } else { "forklift" }
     $forkliftExecutable = Join-Path $targetDirectory "$hostTriple/release/$forkliftName"
     New-Item -ItemType Directory -Path $distributionRoot -Force | Out-Null
-    $stagingDirectory = [System.IO.Path]::GetFullPath((Join-Path $distributionRoot (".truxt-package-" + [guid]::NewGuid().ToString("N"))))
+    $stagingDirectory = [System.IO.Path]::GetFullPath((Join-Path $distributionRoot (".lift-package-" + [guid]::NewGuid().ToString("N"))))
     New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
     try {
         Copy-Item -LiteralPath $executable -Destination $stagingDirectory
@@ -39,18 +39,18 @@ try {
         $examplesDirectory = Join-Path $stagingDirectory "examples"
         New-Item -ItemType Directory -Path $examplesDirectory | Out-Null
         $examplesSourceDirectory = Join-Path $projectRoot "examples"
-        # EN: Preserve imported modules' relative paths and copy source files only.
-        # PT-BR: Preserva caminhos relativos dos módulos e copia apenas fontes.
-        Get-ChildItem -LiteralPath $examplesSourceDirectory -File -Recurse | Where-Object { $_.Extension -eq ".truxt" -or $_.Name -eq "truxt.toml" } | ForEach-Object {
+        # EN: Preserve imported modules' paths, manifests, and example guides.
+        # PT-BR: Preserva caminhos dos módulos, manifestos e guias dos exemplos.
+        Get-ChildItem -LiteralPath $examplesSourceDirectory -File -Recurse | Where-Object { $_.Extension -eq ".lift" -or $_.Name -eq "lift.toml" -or $_.Name -like "README*.md" } | ForEach-Object {
             $exampleRelativePath = $_.FullName.Substring($examplesSourceDirectory.Length + 1)
             $exampleDestination = Join-Path $examplesDirectory $exampleRelativePath
             New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($exampleDestination)) -Force | Out-Null
             Copy-Item -LiteralPath $_.FullName -Destination $exampleDestination
         }
-        $coreGuideDirectory = Join-Path $stagingDirectory "stdlib/truxt_core"
+        $coreGuideDirectory = Join-Path $stagingDirectory "stdlib/lift_core"
         New-Item -ItemType Directory -Path $coreGuideDirectory -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $projectRoot "stdlib/truxt_core/README.md"), (Join-Path $projectRoot "stdlib/truxt_core/README.pt-BR.md") -Destination $coreGuideDirectory
-        $archive = Join-Path $distributionRoot "truxt-$version-$hostTriple.zip"
+        Copy-Item -LiteralPath (Join-Path $projectRoot "stdlib/lift_core/README.md"), (Join-Path $projectRoot "stdlib/lift_core/README.pt-BR.md") -Destination $coreGuideDirectory
+        $archive = Join-Path $distributionRoot "lift-$version-$hostTriple.zip"
         Compress-Archive -Path (Join-Path $stagingDirectory "*") -DestinationPath $archive -Force
         Write-Output $archive
     }
@@ -58,7 +58,7 @@ try {
         # EN: Verify the absolute cleanup target stays inside this output directory.
         # PT-BR: Verifica que o alvo absoluto de limpeza fica neste diretório de saída.
         $stagingParent = [System.IO.Path]::GetDirectoryName($stagingDirectory)
-        if ($stagingParent -eq $distributionRoot -and [System.IO.Path]::GetFileName($stagingDirectory).StartsWith(".truxt-package-")) {
+        if ($stagingParent -eq $distributionRoot -and [System.IO.Path]::GetFileName($stagingDirectory).StartsWith(".lift-package-")) {
             Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
         }
     }

@@ -1,0 +1,13 @@
+import * as math from "math";
+import * as text from "text";
+
+function relay(items: int[]): void { math.bump(items); }
+const items = [1, 2];
+math.bump(items);
+console.log(math.sum(items));
+relay(items);
+console.log(math.sum(items));
+const name = "Lift";
+console.log(text.decorate(name));
+console.log(name);
+console.log(text.length(name));

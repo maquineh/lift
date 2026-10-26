@@ -1,9 +1,9 @@
-# Incremento de módulos explícitos Truxt
+# Incremento de módulos explícitos Lift
 
 Contratos bilíngues completos: `docs/modules.md` / `docs/modules.pt-BR.md`.
 
-- Sintaxe exclusiva de topo: `import module "relative.truxt";`. `module` é contextual, não keyword global. Imports FFI anteriores não mudam.
-- Caminho relativo ao importador, extensão .truxt obrigatória (case-insensitive), sem interpolação/decodificação de escapes. Use `/` para portabilidade. Caminhos com raiz/drive são rejeitados; `..` é aceito.
+- Sintaxe exclusiva de topo: `import module "relative.lift";`. `module` é contextual, não keyword global. Imports FFI anteriores não mudam.
+- Caminho relativo ao importador, extensão .lift obrigatória (case-insensitive), sem interpolação/decodificação de escapes. Use `/` para portabilidade. Caminhos com raiz/drive são rejeitados; `..` é aceito.
 - Canonicalização e marcação antes da recursão deduplicam fontes e permitem ciclos, inclusive pela entrada. Import não executa statements e o root entra uma vez.
 - Somente root admite Declaration::Statement, sujeito às regras semânticas existentes (return exige função); módulos aceitam funções/interfaces/import FFI/outros módulos. O loader rejeita cada statement importado antes de gerar HIR.
 - O grafo é achatado em uma AST para a tabela global existente. Duplicatas preservam os dois spans. Não há visibilidade por arquivo, aliases, namespaces ou manifesto.

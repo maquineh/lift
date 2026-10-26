@@ -4,11 +4,12 @@
 
 ## Status
 
-This document records a design target, not shipped database support. Truxt does
-not yet expose database connections, transactions, rows, or driver bindings.
-The current FFI supports a restricted set of language values; it does not yet
-model opaque non-cloneable resources or async futures. Database handles cannot
-be safely exposed as ordinary copied values.
+`lift_db::api` now provides parameterized CRUD/DDL SQL for SQLite/PostgreSQL,
+configurable pools, affine transactions and materialized scalar results. The
+[API guide](../stdlib/lift_db/README.md) defines exact signatures, TLS policy,
+type limits and acceptance commands. The older fixed SQLite helpers remain
+compatible. The backend/version matrix below remains a target: implemention and
+configured CI do not certify unexecuted platform/version combinations.
 
 ## Compatibility targets
 
@@ -33,7 +34,7 @@ follows database versions that are still actively maintained. Since PostgreSQL
 legacy compatibility. `tokio-postgres` contains catalog fallbacks for older
 server layouts, but that is evidence to test, not an upstream compatibility
 guarantee. The synchronous `postgres` facade is a possible fit for today's
-synchronous Truxt functions; its exact version, TLS feature, and legacy matrix
+synchronous Lift functions; its exact version, TLS feature, and legacy matrix
 must be pinned before implementation. See [SQLx's support
 policy](https://github.com/transact-rs/sqlx/blob/main/FAQ.md#what-database-versions-does-sqlx-support),
 the [`tokio-postgres` fallback](https://github.com/rust-postgres/rust-postgres/blob/master/tokio-postgres/src/prepare.rs),
@@ -51,11 +52,12 @@ without an Oracle Client dependency, but the version inspected for this plan is
 pre-release. Reassess its maturity and server matrix when Oracle work begins:
 [Oracle's Rust driver](https://github.com/oracle/rust-oracledb).
 
-## Truxt API boundary
+## Lift API boundary
 
-Database support belongs in a separate `truxt_db` adapter layer, not in
-`truxt_core`. The compiler and FFI need an explicit resource contract before
-connections can cross the language boundary:
+Database support belongs in a separate `lift_db` adapter layer, not in
+`lift_core`. The proof of concept keeps resources inside the Rust adapter. The
+compiler and FFI still need an explicit resource contract before connections
+can cross the language boundary:
 
 - Database connections, transactions, statements, and streams are opaque,
   non-cloneable resources. Do not represent them as integer or string handles.
@@ -71,7 +73,7 @@ connections can cross the language boundary:
   map them. DSNs, passwords, SQL bind values, and raw driver internals are not
   logged or returned to users by default.
 - The initial API should be synchronous to match the current language. Async
-  drivers must be isolated behind an explicit runtime adapter until Truxt has
+  drivers must be isolated behind an explicit runtime adapter until Lift has
   a defined async/future contract.
 
 PostgreSQL 15/17 and SQLite are the first implementation targets. PostgreSQL

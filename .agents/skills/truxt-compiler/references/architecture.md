@@ -1,16 +1,16 @@
-# Blueprint técnico do Truxt v0.1
+# Blueprint técnico do Lift v0.1
 
 Esta referência consolida o blueprint fornecido pelo usuário. Ela descreve o alvo do compilador, não prova que a implementação atual já satisfaça esses contratos. Em conflito com o código ou com uma instrução posterior do usuário, descreva a diferença e siga o escopo autorizado para a tarefa.
 
 ## Objetivo e workspace
 
-Fluxo pretendido: fonte `.truxt` → AST → HIR tipado → código Rust → binário nativo.
+Fluxo pretendido: fonte `.lift` → AST → HIR tipado → código Rust → binário nativo.
 
 ## Compatibilidade TypeScript/Rust
 
-Truxt busca familiaridade de sintaxe e semântica com TypeScript em um subconjunto
+Lift busca familiaridade de sintaxe e semântica com TypeScript em um subconjunto
 explicitamente suportado; não promete compatibilidade completa com TypeScript.
-Cada recurso novo deve documentar sua semântica Truxt, limites em relação ao
+Cada recurso novo deve documentar sua semântica Lift, limites em relação ao
 TypeScript e lowering para Rust, preservando comportamento previsível e tipos
 válidos. Ownership, borrowing, segurança e regras de tipos do Rust podem limitar
 o subconjunto, mas não devem introduzir diferenças silenciosas. Valide o código
@@ -18,18 +18,18 @@ Rust gerado com Cargo/rustc nos exemplos e casos de contrato afetados antes de
 afirmar compatibilidade.
 
 ```text
-truxt/
+lift/
 ├── Cargo.toml
 ├── crates/
-│   ├── truxt_lexer/     # fonte -> tokens com spans
-│   ├── truxt_ast/       # nós da AST, sem lógica
-│   ├── truxt_parser/    # tokens -> AST não tipada
-│   ├── truxt_sema/      # símbolos, tipos, análise de ownership -> HIR
-│   ├── truxt_codegen/   # HIR -> Rust e manifesto Cargo
-│   ├── truxt_project/   # sessão, grafo, overlays, diagnósticos e lint HIR
-│   └── truxt_cli/       # build, run, check, init
+│   ├── lift_lexer/     # fonte -> tokens com spans
+│   ├── lift_ast/       # nós da AST, sem lógica
+│   ├── lift_parser/    # tokens -> AST não tipada
+│   ├── lift_sema/      # símbolos, tipos, análise de ownership -> HIR
+│   ├── lift_codegen/   # HIR -> Rust e manifesto Cargo
+│   ├── lift_project/   # sessão, grafo, overlays, diagnósticos e lint HIR
+│   └── lift_cli/       # build, run, check, init
 └── stdlib/
-    └── truxt_core/      # Console, helpers de array e operações de string
+    └── lift_core/      # Console, helpers de array e operações de string
 ```
 
 ## Roadmap e limite de cada fase
@@ -38,10 +38,10 @@ truxt/
 | --- | --- | --- |
 | 1 — Core Syntax & Primitivos (MVP) | Lexer com `logos`; parser recursivo descendente e Pratt para expressões; `const`/`let`, funções, `if`/`else`, `while`; `number`, `int`, `string`, `boolean`, `void`. | Fibonacci recursivo e iterativo gera `.rs`. |
 | 2 — Estruturas e objetos | `interface`, object literals, acesso a campos, `impl` e arrays (`T[]` → `Vec<T>`). | Manipular produtos, filtrar e somar valores. |
-| 3 — Semântica e auto-borrow | Escopos/tabela de símbolos, inferência bidirecional, análise de mutação e modos de ownership. | Passar objetos entre funções sem escrever `&`/`.clone()` no Truxt e produzir Rust aceito por `rustc`. |
+| 3 — Semântica e auto-borrow | Escopos/tabela de símbolos, inferência bidirecional, análise de mutação e modos de ownership. | Passar objetos entre funções sem escrever `&`/`.clone()` no Lift e produzir Rust aceito por `rustc`. |
 | 4 — Optionais e erros | `T?` → `Option<T>`, `??`, unions/`enum`, `try`/`catch` ou `Result` transparente. | Tratar operações falíveis sem `.unwrap()` manual. |
 | 5 — Biblioteca e interop | Métodos estilo JS/TS, `console.log`, template strings e FFI/import de crates Rust. | Consumir uma crate Rust real. |
-| 6 — CLI e diagnósticos | `clap`, diagnósticos `ariadne`, cache `.truxt_cache/` e invocação de `cargo build --release`. | `truxt run app.truxt` produz e executa o binário nativo. |
+| 6 — CLI e diagnósticos | `clap`, diagnósticos `ariadne`, cache `.lift_cache/` e invocação de `cargo build --release`. | `lift run app.lift` produz e executa o binário nativo. |
 
 O blueprint também sugere criar AST e lexer com tokens/nós para objetos, funções, arrays e operadores na etapa inicial. Isso pode ser preparação estrutural; não significa que parser, semântica e codegen dessas funcionalidades estejam entregues na Fase 1. Mantenha explícito qual camada e qual fase passam a suportá-las.
 
@@ -61,15 +61,22 @@ ao TypeScript e limites de ownership; callbacks/escape de closure seguem fora.
 ## Pipelines
 
 O incremento de tooling extrai a carga de projeto e SourceMap da CLI para
-`truxt_project`, preservando APIs/semântica anteriores. CLI, lint e LSP inicial
+`lift_project`, preservando APIs/semântica anteriores. CLI, lint e LSP inicial
 consomem a mesma sessão; veja `tooling-decisions.md` e os guias bilíngues
 `docs/project-analysis-and-lsp.md` / `docs/project-analysis-and-lsp.pt-BR.md`.
 
+O incremento de recursos/HTTP representa conexões/transações SQLite no HIR como
+`ResolvedType::Resource`, separado das structs de valor clonáveis. As assinaturas
+FFI locais registram modos de passagem explícitos, e a análise de fluxo afim
+valida consumo antes do codegen. DTOs e handlers HTTP são declarados em Lift;
+bridges sem captura conectam funções nomeadas ao adaptador genérico. Consulte
+`docs/resources-and-http.md` / `.pt-BR.md` para o protocolo fechado e os limites.
+
 ### A. Fonte para AST
 
-1. O loader lê o grafo `.truxt`, mantém textos/caminhos no SourceMap da CLI e fornece `Span { source: SourceId, start: usize, end: usize }`. Construtores/APIs legadas continuam com fonte zero.
-2. `truxt_lexer` produz `Vec<(Token, Span)>`; cada nó AST deve preservar seu `Span`. O blueprint prevê interpolação de template string em partes de texto e expressão.
-3. `truxt_parser` usa recursive descent para declarações e Pratt parsing para expressões binárias e pós-fixadas (`.`, `()`, `[]`), produzindo `UntypedAST`.
+1. O loader lê o grafo `.lift`, mantém textos/caminhos no SourceMap da CLI e fornece `Span { source: SourceId, start: usize, end: usize }`. Construtores/APIs legadas continuam com fonte zero.
+2. `lift_lexer` produz `Vec<(Token, Span)>`; cada nó AST deve preservar seu `Span`. O blueprint prevê interpolação de template string em partes de texto e expressão.
+3. `lift_parser` usa recursive descent para declarações e Pratt parsing para expressões binárias e pós-fixadas (`.`, `()`, `[]`), produzindo `UntypedAST`.
 
 Feche um contrato de span compartilhado entre crates. A unidade de offset (bytes ou caracteres), intervalos, spans de EOF/erros e acesso ao lexema precisam ser consistentes. As assinaturas propostas não passam `src` ao parser; portanto, o conteúdo dos identificadores/literais precisa estar disponível nos tokens ou a API deve ser ajustada explicitamente. Não crie tipos de span incompatíveis em crates diferentes.
 
@@ -97,9 +104,9 @@ Não confunda o modo da assinatura de um parâmetro (`BorrowImm`, `BorrowMut` ou
 
 ### D. Lowering e Cargo
 
-Transformações exemplificadas: concatenação com `+` para `format!`, `.map()` para `iter().map(...).collect::<Vec<_>>()`, e `console.log` para `println!`. O codegen grava `.truxt_cache/src/main.rs` e `.truxt_cache/Cargo.toml`; a CLI invoca Cargo, captura avisos/saída e copia ou executa o binário conforme o comando solicitado.
+Transformações exemplificadas: concatenação com `+` para `format!`, `.map()` para `iter().map(...).collect::<Vec<_>>()`, e `console.log` para `println!`. O codegen grava `.lift_cache/src/main.rs` e `.lift_cache/Cargo.toml`; a CLI invoca Cargo, captura avisos/saída e copia ou executa o binário conforme o comando solicitado.
 
-Essas traduções dependem de tipos e ownership: `.map()` não implica sempre `.iter()`, uma closure pode consumir ou emprestar elementos, e strings podem exigir `String` ou empréstimo conforme uso/mutação. Preserve o requisito de `derive(Clone, Debug, PartialEq)` nas structs e verifique que os tipos de todos os campos satisfazem os traits gerados. Como a assinatura proposta de `emit_rust` retorna `String`, a semântica deve rejeitar HIR inválido ou recursos ainda não suportados antes do codegen, em vez de esperar que `rustc` descubra erro de linguagem Truxt.
+Essas traduções dependem de tipos e ownership: `.map()` não implica sempre `.iter()`, uma closure pode consumir ou emprestar elementos, e strings podem exigir `String` ou empréstimo conforme uso/mutação. Preserve o requisito de `derive(Clone, Debug, PartialEq)` nas structs e verifique que os tipos de todos os campos satisfazem os traits gerados. Como a assinatura proposta de `emit_rust` retorna `String`, a semântica deve rejeitar HIR inválido ou recursos ainda não suportados antes do codegen, em vez de esperar que `rustc` descubra erro de linguagem Lift.
 
 ## Stack proposta
 
@@ -135,7 +142,7 @@ Esta gramática é um resumo, não uma especificação completa: não detalha op
 
 ## Mapeamento de tipos fornecido
 
-| Truxt | Rust pretendido |
+| Lift | Rust pretendido |
 | --- | --- |
 | `int` | `i64` (`Copy`) |
 | `number` | `f64` (`Copy`) |
@@ -149,13 +156,13 @@ Esta gramática é um resumo, não uma especificação completa: não detalha op
 ## Contratos entre crates
 
 ```rust
-truxt_lexer::tokenize(src: &str)
+lift_lexer::tokenize(src: &str)
     -> Result<Vec<(Token, Span)>, LexError>
-truxt_parser::parse(tokens: &[(Token, Span)])
+lift_parser::parse(tokens: &[(Token, Span)])
     -> Result<ProgramAst, Vec<ParseError>>
-truxt_sema::analyze(ast: ProgramAst)
+lift_sema::analyze(ast: ProgramAst)
     -> Result<HirProgram, Vec<SemaError>>
-truxt_codegen::emit_rust(hir: &HirProgram)
+lift_codegen::emit_rust(hir: &HirProgram)
     -> String
 ```
 
@@ -181,6 +188,6 @@ Estas são as assinaturas exatas fornecidas como contratos-alvo. Confira a imple
 - Tratamento concreto de `try`/`catch` versus `Result` e construção/seleção de variantes de unions.
 - Imports/FFI gerais continuam fora do contrato: o MVP da Fase 5 declara assinaturas explícitas para funções seguras e tipos limitados; adicionar uma crate ao Cargo não fornece por si só assinaturas nem mapeamento de tipos.
 - Política de dependências, chave do cache para entradas/configurações e estrutura final do Cargo gerado.
-- Nome final do comando CLI (`truxtc` aparece no exemplo inicial de comandos; o exemplo de execução usa `truxt`).
+- Nome final do comando CLI (`liftc` aparece no exemplo inicial de comandos; o exemplo de execução usa `lift`).
 
 Se uma tarefa tocar uma dessas áreas, documente decisão, abrangência e limitações no código/documentação pertinente; não apresente o comportamento como definido pelo blueprint quando foi escolhido durante a implementação.

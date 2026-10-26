@@ -2,7 +2,7 @@
 
 [Português do Brasil](liveness.pt-BR.md) · [User guide](../README.md)
 
-After semantic analysis succeeds, a private pass builds a control-flow graph for each function and for the entry script. It does not change syntax, accepted programs, parameter modes, alias diagnostics, or Truxt's value-copy behavior. It can remove a redundant copy when the original owned value is never needed again.
+After semantic analysis succeeds, a private pass builds a control-flow graph for each function and for the entry script. It does not change syntax, accepted programs, parameter modes, alias diagnostics, or Lift's value-copy behavior. It can remove a redundant copy when the original owned value is never needed again.
 
 Each simple statement and each `if`/`while` condition has a graph point. Branches join at their actual continuation; `return` has no successor. Loops include the condition backedge and the zero-iteration exit. Backward liveness computes `live_out = union(live_in(successors))` and `live_in = uses ∪ (live_out − defs)` until a fixed point. Direct rebinding kills the previous value; a field/index mutation does not kill its root. Calls conservatively use every argument.
 
@@ -14,4 +14,4 @@ The proof is at statement granularity. It does not prove general last use inside
 
 The Option increment observes payloads and both coalesce operands as possible uses, while leaving clones inside Some/Coalesce untouched. This preserves conservative liveness around a conditional fallback; see [Option](option.md).
 
-Tests cover eligible copies in functions/scripts, future uses, if/else/else-if joins, terminal returns, loop fixed points/zero iterations, reassignment, repeated occurrences, borrowed parameters, projections, and preserved `ByClone`. The CLI compiles `examples/liveness.truxt` through check/build/run and verifies the native executable's output. These tests establish the exercised cases, not a general borrow checker proof.
+Tests cover eligible copies in functions/scripts, future uses, if/else/else-if joins, terminal returns, loop fixed points/zero iterations, reassignment, repeated occurrences, borrowed parameters, projections, and preserved `ByClone`. The CLI compiles `examples/liveness.lift` through check/build/run and verifies the native executable's output. These tests establish the exercised cases, not a general borrow checker proof.

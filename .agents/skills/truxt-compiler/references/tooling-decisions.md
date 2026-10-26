@@ -2,7 +2,7 @@
 
 Contratos bilíngues: `docs/project-analysis-and-lsp.md` / `docs/project-analysis-and-lsp.pt-BR.md`.
 
-- `truxt_project` extrai loader/SourceMap antes privados da CLI. `ProjectSession`
+- `lift_project` extrai loader/SourceMap antes privados da CLI. `ProjectSession`
   mantém overlays; `analyze` retorna `Analysis { entry, sources, hir, diagnostics }`.
   Falhas preservam fontes/spans sem devolver HIR parcial.
 - Overlays preservam grafia absoluta estável, inclusive `..`; aliases são resolvidos
@@ -24,7 +24,7 @@ Contratos bilíngues: `docs/project-analysis-and-lsp.md` / `docs/project-analysi
 - Lint HIR advisory: unused-binding (IDs, escrita conta, captura visitada,
   `_`/this isentos), literal-condition e discarded-value limitado. Warning sai 0;
   `--deny-warnings` sai 1; erros fonte/sema continuam Error/1. Sem autofix.
-- `truxt lsp`: JSON-RPC stdio, full-sync, overlays multi-file, UTF-16, versões,
+- `lift lsp`: JSON-RPC stdio, full-sync, overlays multi-file, UTF-16, versões,
   relatedInformation e limpeza de diagnósticos. Análise síncrona; versões antigas
   ignoradas. Entry opcional determina grafo; sem ela cada fonte escolhe projeto
   manifestado ancestral ou root legado; fora do grafo gera diagnóstico explícito.
@@ -33,5 +33,5 @@ Contratos bilíngues: `docs/project-analysis-and-lsp.md` / `docs/project-analysi
   language configuration e tasks ProcessExecution (arquivo salvo). Entry relativo
   usa primeira pasta. Fonte local, sem publicação Marketplace.
 - API/protocolo/CLI têm testes; smoke visual VSCode segue manual. Forklift por
-  path está implementado; bindings, callbacks/async/truxt_web e DAP seguem próximos.
+  path está implementado; bindings, callbacks/async/lift_web e DAP seguem próximos.
   Não escolher driver sem validar PostgreSQL 8.4/9.1; podem requerer legado.

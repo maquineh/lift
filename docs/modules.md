@@ -3,12 +3,12 @@
 [Português do Brasil](modules.pt-BR.md) · [User guide](../README.md)
 
 This document describes legacy flat file imports, preserved without a manifest.
-The separate [Forklift increment](forklift.md) adds `truxt.toml`, package
+The separate [Forklift increment](forklift.md) adds `lift.toml`, package
 namespaces and exported functions; its file modules remain flat within each package.
 
-`import module "relative.truxt";` is a top-level declaration, parsed separately from Rust FFI imports. The semicolon is required. `module` is contextual here and remains available as an ordinary identifier elsewhere. Nested imports, aliases, namespaces, exports, package search paths, and a project manifest are outside this increment.
+`import module "relative.lift";` is a top-level declaration, parsed separately from Rust FFI imports. The semicolon is required. `module` is contextual here and remains available as an ordinary identifier elsewhere. Nested imports, aliases, namespaces, exports, package search paths, and a project manifest are outside this increment.
 
-Each path is relative to the importing source file, independently of the caller's current directory. It must have a `.truxt` extension (case-insensitive, consistent with CLI entry-file validation). Absolute/rooted paths and drive-qualified paths are rejected. `..` is allowed. Specifiers use their literal token text with no interpolation or runtime string-escape decoding; use `/` for portable paths.
+Each path is relative to the importing source file, independently of the caller's current directory. It must have a `.lift` extension (case-insensitive, consistent with CLI entry-file validation). Absolute/rooted paths and drive-qualified paths are rejected. `..` is allowed. Specifiers use their literal token text with no interpolation or runtime string-escape decoding; use `/` for portable paths.
 
 The CLI canonicalizes and deduplicates files before following their imports. Each canonical source is read/parsed once in a compilation. A visited file is marked before recursion, so repeated imports, module-to-module cycles, and imports back to the entry file do not duplicate declarations or run entry statements again. File imports have no runtime execution step.
 
@@ -32,4 +32,4 @@ The CLI owns a table of canonical paths and UTF-8 source text. AST and HIR spans
 
 The graph produces one typed program, one generated Rust source, and one executable in the entry file's cache. Generated-file byte reuse and Cargo incrementality remain in effect. The entire graph is loaded and analyzed on each command; this is not a dependency-hash cache. Changing a transitive module affects the next command even if the entry file is unchanged.
 
-`examples/modules/main.truxt` exercises shared interfaces/functions, a Rust FFI declaration in a module, importer-relative transitives, duplicate paths, module cycles, and an entry-file cycle. Tests check stdout and exactly-once root execution, transitive source changes, statement rejection, imported UTF-8/EOF errors, duplicate labels across files, invalid paths, and empty modules. They do not claim support for dynamic loading or separate compilation.
+`examples/modules/main.lift` exercises shared interfaces/functions, a Rust FFI declaration in a module, importer-relative transitives, duplicate paths, module cycles, and an entry-file cycle. Tests check stdout and exactly-once root execution, transitive source changes, statement rejection, imported UTF-8/EOF errors, duplicate labels across files, invalid paths, and empty modules. They do not claim support for dynamic loading or separate compilation.

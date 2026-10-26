@@ -1,0 +1,81 @@
+interface Request { method: string, path: string, query: string, body: string }
+interface Response { status: int, body: string }
+
+import function env_or(name: string, fallback: string): Result<string, string> from "lift_core::io::env_or";
+import function parse_int(value: string): Result<int, string> from "lift_core::interop::parse_int";
+import function exit(code: int): void from "lift_core::io::exit";
+import function create_pool(driver: string, url: string, min_idle: int, max_connections: int, acquire_timeout_ms: int): Result<DbPool, string> from "lift_db::api::create_pool";
+import function pool_driver(pool: DbPool): string from "lift_db::api::pool_driver";
+import function execute(pool: DbPool, sql: string, params: DbValue[]): Result<int, string> from "lift_db::api::execute";
+import function query(pool: DbPool, sql: string, params: DbValue[]): Result<DbRows, string> from "lift_db::api::query";
+import function begin(pool: DbPool): Result<DbTransaction, string> from "lift_db::api::begin";
+import function tx_query(transaction: DbTransaction, sql: string, params: DbValue[]): Result<DbRows, string> from "lift_db::api::tx_query";
+import function commit(transaction: DbTransaction): Result<void, string> from "lift_db::api::commit";
+import function row_count(rows: DbRows): int from "lift_db::api::row_count";
+import function close_rows(rows: DbRows): void from "lift_db::api::close_rows";
+import function get_int(rows: DbRows, row: int, column: int): Result<int, string> from "lift_db::api::get_int";
+import function get_text(rows: DbRows, row: int, column: int): Result<string, string> from "lift_db::api::get_text";
+import function value_text(value: string): DbValue from "lift_db::api::value_text";
+import function is_blank(value: string): boolean from "lift_web::http::is_blank";
+import function escape_text(value: string): string from "lift_core::interop::escape_lines";
+
+function health(request: Request): Response {
+    return { status: 200, body: "ok" };
+}
+function list_notes(request: Request, pool: DbPool): Response {
+    const selected = query(pool, "SELECT id, body FROM notes ORDER BY id", []);
+    if result.is_ok(selected) {
+        const rows = result.unwrap(selected);
+        let index = 0;
+        let body = "";
+        while index < row_count(rows) {
+            const id = get_int(rows, index, 0);
+            const text = get_text(rows, index, 1);
+            if !result.is_ok(id) || !result.is_ok(text) { return { status: 500, body: "invalid notes database row" }; }
+            if index > 0 { body = body + "\n"; }
+            body = body + `${result.unwrap(id)}\t${escape_text(result.unwrap(text))}`;
+            index = index + 1;
+        }
+        close_rows(rows);
+        return { status: 200, body: body };
+    }
+    return { status: 500, body: "notes database is unavailable" };
+}
+function create_note(request: Request, pool: DbPool): Response {
+    if is_blank(request.body) { return { status: 400, body: "note body must not be empty" }; }
+    const started = begin(pool);
+    if result.is_ok(started) {
+        const transaction = result.unwrap(started);
+        const inserted = tx_query(transaction, "INSERT INTO notes (body) VALUES ($1) RETURNING id", [value_text(request.body)]);
+        if result.is_ok(inserted) {
+            const rows = result.unwrap(inserted);
+            const id = get_int(rows, 0, 0);
+            close_rows(rows);
+            if result.is_ok(id) {
+                const completed = commit(transaction);
+                if result.is_ok(completed) { return { status: 201, body: `created note ${result.unwrap(id)}` }; }
+            }
+        }
+    }
+    return { status: 500, body: "notes database is unavailable" };
+}
+function initialize(pool: DbPool): boolean {
+    let ddl = "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)";
+    if pool_driver(pool) == "postgres" { ddl = "CREATE TABLE IF NOT EXISTS notes (id BIGSERIAL PRIMARY KEY, body TEXT NOT NULL)"; }
+    return result.is_ok(execute(pool, ddl, []));
+}
+
+const driver = result.unwrap(env_or("LIFT_DB_DRIVER", "sqlite"));
+const legacy_path = result.unwrap(env_or("LIFT_NOTES_DB", "lift-notes.sqlite3"));
+const url = result.unwrap(env_or("LIFT_DB_URL", "sqlite:" + legacy_path));
+const min_idle = result.unwrap(parse_int(result.unwrap(env_or("LIFT_DB_MIN_IDLE", "1"))));
+const max_connections = result.unwrap(parse_int(result.unwrap(env_or("LIFT_DB_MAX_CONNECTIONS", "4"))));
+const acquire_timeout = result.unwrap(parse_int(result.unwrap(env_or("LIFT_DB_ACQUIRE_TIMEOUT_MS", "1000"))));
+const pool = result.unwrap(create_pool(driver, url, min_idle, max_connections, acquire_timeout));
+if !initialize(pool) { console.log("could not initialize notes schema"); exit(1); }
+http.route("GET", "/health", health);
+http.route("POST", "/notes", create_note);
+http.route("GET", "/notes", list_notes);
+console.log("Iniciando o serviço Lift Notes...");
+const server = http.serve("127.0.0.1:3000", 16384, pool);
+if !result.is_ok(server) { console.log(result.unwrap_err(server)); exit(1); }

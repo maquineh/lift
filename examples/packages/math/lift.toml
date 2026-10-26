@@ -1,0 +1,8 @@
+[package]
+name = "math"
+version = "0.1.0"
+kind = "lib"
+entry = "main.lift"
+
+[dependencies]
+base = { path = "../base" }

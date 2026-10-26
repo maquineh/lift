@@ -2,9 +2,9 @@
 
 [Português do Brasil](option.pt-BR.md) · [User guide](../README.md)
 
-Truxt spells an optional type as `T?` and lowers it to Rust `Option<T>`. `null` is a reserved literal for the single absent variant (`None`), only where the payload type can be inferred. There is no `undefined` absence value, implicit `T`→`T?` conversion, or general `Option<T>` generic syntax in Truxt.
+Lift spells an optional type as `T?` and lowers it to Rust `Option<T>`. `null` is a reserved literal for the single absent variant (`None`), only where the payload type can be inferred. There is no `undefined` absence value, implicit `T`→`T?` conversion, or general `Option<T>` generic syntax in Lift.
 
-```truxt
+```lift
 const absent: int? = null;
 const present = option.some(7);
 console.log(absent ?? present ?? 9); // 7
@@ -15,7 +15,7 @@ console.log(option.some(false) ?? true); // false
 
 ## Types and required fields
 
-| Truxt type | Rust type | Meaning |
+| Lift type | Rust type | Meaning |
 | --- | --- | --- |
 | `int?` | `Option<i64>` | Optional integer. |
 | `int?[]` | `Vec<Option<i64>>` | Array of optional integers. |
@@ -39,8 +39,8 @@ There is no flow narrowing: after `if option.is_some(value)`, `value` still has 
 
 ## Ownership and validation
 
-The HIR records owned `OptionSome`, typed `OptionNone`, and a dedicated `Coalesce` node with an explicit value/optional result mode. The left becomes an owned snapshot using existing copy/clone rules. Code generation emits `match` on that snapshot and places the owned fallback only in the `None` arm; it does not use a closure or rediscover ownership. The original optional remains available according to Truxt's value-copy rules.
+The HIR records owned `OptionSome`, typed `OptionNone`, and a dedicated `Coalesce` node with an explicit value/optional result mode. The left becomes an owned snapshot using existing copy/clone rules. Code generation emits `match` on that snapshot and places the owned fallback only in the `None` arm; it does not use a closure or rediscover ownership. The original optional remains available according to Lift's value-copy rules.
 
 Liveness observes both possible operands conservatively and keeps their clones inside coalesce and Some in this increment. It does not treat the fallback as an unconditional runtime action or infer narrowing. Existing borrow/alias diagnostics remain in effect.
 
-Parser, semantic, codegen, and CLI tests cover suffix ordering, types, required fields, null inference, FFI rejection, recursive types, explicit unwrap failure, and lazy/exactly-once effects. `examples/option.truxt` mutates counters to distinguish evaluated paths and verifies false/zero/empty-string payloads through a native binary.
+Parser, semantic, codegen, and CLI tests cover suffix ordering, types, required fields, null inference, FFI rejection, recursive types, explicit unwrap failure, and lazy/exactly-once effects. `examples/option.lift` mutates counters to distinguish evaluated paths and verifies false/zero/empty-string payloads through a native binary.

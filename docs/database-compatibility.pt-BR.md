@@ -4,11 +4,12 @@
 
 ## Estado
 
-Este documento registra um alvo de projeto, não suporte já entregue. Truxt
-ainda não expõe conexões, transações, linhas ou bindings de drivers de banco.
-O FFI atual suporta um conjunto restrito de valores da linguagem; ainda não
-representa recursos opacos não clonáveis nem futures assíncronas. Handles de
-banco não podem ser expostos com segurança como valores copiados comuns.
+`lift_db::api` agora oferece SQL CRUD/DDL parametrizado SQLite/PostgreSQL,
+pools configuráveis, transações afins e resultados escalares materializados.
+O [guia da API](../stdlib/lift_db/README.pt-BR.md) define assinaturas, política TLS,
+limites de tipos e comandos de aceite. Helpers SQLite antigos continuam
+compatíveis. A matriz de backends/versões abaixo permanece um alvo: implementação
+e CI configurado não certificam combinações ainda não executadas.
 
 ## Alvos de compatibilidade
 
@@ -33,7 +34,7 @@ suporte acompanha as versões de banco ainda mantidas ativamente. Como PostgreSQ
 compatibilidade legada solicitada. `tokio-postgres` tem fallbacks de catálogo
 para layouts antigos, mas isso é evidência para testar, não garantia upstream.
 A fachada síncrona `postgres` pode se encaixar nas funções síncronas atuais de
-Truxt; a versão exata, feature TLS e matriz legada precisam ser fixadas antes da
+Lift; a versão exata, feature TLS e matriz legada precisam ser fixadas antes da
 implementação. Consulte a
 [política de suporte do SQLx](https://github.com/transact-rs/sqlx/blob/main/FAQ.md#what-database-versions-does-sqlx-support), o
 [fallback de `tokio-postgres`](https://github.com/rust-postgres/rust-postgres/blob/master/tokio-postgres/src/prepare.rs)
@@ -51,11 +52,12 @@ que não depende do Oracle Client, mas a versão consultada para este plano aind
 é pré-release. Reavalie maturidade e matriz de servidores quando a etapa Oracle
 começar: [driver Rust da Oracle](https://github.com/oracle/rust-oracledb).
 
-## Fronteira da API Truxt
+## Fronteira da API Lift
 
-O suporte a banco pertence a uma camada adaptadora separada, `truxt_db`, e não
-ao `truxt_core`. O compilador e o FFI precisam de um contrato explícito de
-recursos antes que conexões cruzem a fronteira da linguagem:
+O suporte a banco pertence a uma camada adaptadora separada, `lift_db`, e não
+ao `lift_core`. Na PoC, recursos permanecem dentro do adaptador Rust; para
+cruzarem a fronteira da linguagem, o compilador e o FFI ainda precisam de um
+contrato explícito:
 
 - Conexões, transações, statements e streams de banco são recursos opacos e não
   clonáveis. Não os represente como handles inteiros ou strings.
@@ -70,7 +72,7 @@ recursos antes que conexões cruzem a fronteira da linguagem:
   senhas, valores de bind e detalhes internos do driver não são registrados nem
   retornados ao usuário por padrão.
 - A API inicial deve ser síncrona, de acordo com a linguagem atual. Drivers async
-  ficam isolados atrás de um adaptador explícito de runtime até Truxt definir
+  ficam isolados atrás de um adaptador explícito de runtime até Lift definir
   contratos de async/futures.
 
 PostgreSQL 15/17 e SQLite são os primeiros alvos de implementação. PostgreSQL

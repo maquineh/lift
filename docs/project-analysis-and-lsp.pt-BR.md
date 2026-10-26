@@ -2,20 +2,20 @@
 
 [English](project-analysis-and-lsp.md) · [Guia de uso](../README.pt-BR.md)
 
-`truxt_project` é a fachada reutilizável do frontend para CLI, lint HIR e LSP
+`lift_project` é a fachada reutilizável do frontend para CLI, lint HIR e LSP
 inicial. APIs existentes de lexer/parser/sema/codegen e a semântica HIR permanecem
 iguais. Build/check/run consomem a fachada antes das etapas Rust/Cargo existentes.
 
-O [incremento Forklift local](forklift.pt-BR.md) acrescenta `truxt.toml`, análise
+O [incremento Forklift local](forklift.pt-BR.md) acrescenta `lift.toml`, análise
 contextual de pacotes, namespaces e funções exportadas. APIs mantêm assinaturas;
 enums AST ganham variantes para a nova sintaxe.
 
 ```rust
-use truxt_project::{ProjectSession, lint};
+use lift_project::{ProjectSession, lint};
 
 let mut session = ProjectSession::new();
-session.set_overlay("main.truxt", "console.log(7);".to_owned())?;
-let analysis = session.analyze("main.truxt");
+session.set_overlay("main.lift", "console.log(7);".to_owned())?;
+let analysis = session.analyze("main.lift");
 if let Some(hir) = &analysis.hir {
     let warnings = lint::lint(hir);
     // emit_rust(hir), ou consuma o programa tipado em outro frontend.
@@ -66,14 +66,14 @@ drive/UNC do Windows.
 ## Lint
 
 ```sh
-truxt lint examples/modules/main.truxt
-truxt lint --deny-warnings examples/modules/main.truxt
+lift lint examples/modules/main.lift
+lift lint --deny-warnings examples/modules/main.lift
 ```
 
 Lint carrega e verifica tipos do grafo completo, depois percorre HIR validado.
-Não emite Rust, cria `.truxt_cache` ou verifica imports Rust com Cargo. Avisos saem
+Não emite Rust, cria `.lift_cache` ou verifica imports Rust com Cargo. Avisos saem
 0 por padrão; `--deny-warnings` sai 1 se houver avisos. Erros fonte/sema continuam
-erros e saem 1. `truxt check` continua validando Rust gerado, caminhos e assinaturas.
+erros e saem 1. `lift check` continua validando Rust gerado, caminhos e assinaturas.
 
 | Regra | Comportamento consultivo |
 | --- | --- |
@@ -86,7 +86,7 @@ decisões de ownership/codegen. Também visitam corpos de closures locais.
 
 ## LSP inicial e VS Code
 
-`truxt lsp` usa JSON-RPC em stdio com framing Content-Length e logs em stderr.
+`lift lsp` usa JSON-RPC em stdio com framing Content-Length e logs em stderr.
 Anuncia full-sync e posições UTF-16. Suporta initialize/initialized/shutdown/exit,
 didOpen/didChange/didSave/didClose e workspace/didChangeWatchedFiles. Outras
 requisições retornam method-not-found. Publica erros frontend, locais relacionados
@@ -118,15 +118,16 @@ de disco. A reanálise atual é completa, sem debounce.
 
 A [extensão local VS Code](../editors/vscode/README.pt-BR.md) contém cliente stdio,
 grammar TextMate com interpolação de templates, regras de comentários/brackets e
-tasks check/build/lint/run. Configure `truxt.serverPath` e, para módulos,
-`truxt.entry`. A primeira pasta do workspace resolve entradas relativas; múltiplos
+tasks check/build/lint/run. Configure `lift.serverPath` e, para módulos,
+`lift.entry`. A primeira pasta do workspace resolve entradas relativas; múltiplos
 projetos não têm roteamento próprio. Tasks consomem arquivos salvos; LSP consome
 overlays. Mudanças de configuração reiniciam o cliente. A extensão não foi publicada.
 
 ## Próximos incrementos
 
 Forklift local com dependências path, manifestos e namespaces está implementado;
-veja [seu escopo exato](forklift.pt-BR.md). Bindings, callbacks externos/async e
-`truxt_web`, então DAP continuam próximos. Não há driver de banco, runtime web ou debugger. Compatibilidade
+veja [seu escopo exato](forklift.pt-BR.md). A PoC local de notas adiciona
+adaptadores SQLite/HTTP, sem bindings de handles ou callbacks externos em Lift.
+Handlers Lift, uma API de banco geral e DAP continuam próximos. Compatibilidade
 PostgreSQL 8.4/9.1 deve ser validada antes de escolher driver; não se presume que
 drivers modernos suportem esses servidores.

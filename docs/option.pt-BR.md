@@ -2,9 +2,9 @@
 
 [English](option.md) · [Guia de uso](../README.pt-BR.md)
 
-Truxt escreve tipos opcionais como `T?` e gera Rust `Option<T>`. `null` é literal reservado para a ausência única (`None`), somente onde o tipo do payload é inferível. Não há ausência `undefined`, conversão implícita `T`→`T?` ou sintaxe genérica geral `Option<T>` em Truxt.
+Lift escreve tipos opcionais como `T?` e gera Rust `Option<T>`. `null` é literal reservado para a ausência única (`None`), somente onde o tipo do payload é inferível. Não há ausência `undefined`, conversão implícita `T`→`T?` ou sintaxe genérica geral `Option<T>` em Lift.
 
-```truxt
+```lift
 const absent: int? = null;
 const present = option.some(7);
 console.log(absent ?? present ?? 9); // 7
@@ -15,7 +15,7 @@ console.log(option.some(false) ?? true); // false
 
 ## Tipos e campos obrigatórios
 
-| Tipo Truxt | Tipo Rust | Significado |
+| Tipo Lift | Tipo Rust | Significado |
 | --- | --- | --- |
 | `int?` | `Option<i64>` | Inteiro opcional. |
 | `int?[]` | `Vec<Option<i64>>` | Array de inteiros opcionais. |
@@ -39,8 +39,8 @@ Não há narrowing: após `if option.is_some(value)`, `value` continua `T?`. Ext
 
 ## Ownership e validação
 
-O HIR registra `OptionSome` owned, `OptionNone` tipado e `Coalesce` próprio com modo explícito de retorno valor/opcional. A esquerda vira snapshot owned pelas regras existentes de cópia/clone. Codegen emite `match` nesse snapshot e mantém o fallback owned somente no braço `None`, sem closure nem inferência nova de ownership. O opcional original continua disponível segundo a semântica de valores Truxt.
+O HIR registra `OptionSome` owned, `OptionNone` tipado e `Coalesce` próprio com modo explícito de retorno valor/opcional. A esquerda vira snapshot owned pelas regras existentes de cópia/clone. Codegen emite `match` nesse snapshot e mantém o fallback owned somente no braço `None`, sem closure nem inferência nova de ownership. O opcional original continua disponível segundo a semântica de valores Lift.
 
 Liveness observa ambos os operandos possíveis conservadoramente e preserva clones dentro de coalesce e Some neste incremento. Isso não torna o fallback incondicional em runtime nem prova narrowing. Diagnósticos de borrow/alias continuam ativos.
 
-Testes parser/sema/codegen/CLI cobrem sufixos, tipos, campos obrigatórios, inferência de null, rejeição FFI, ciclos, unwrap inválido e efeitos lazy/exatamente uma vez. `examples/option.truxt` muda contadores para distinguir caminhos e verifica payloads false/zero/string vazia no binário nativo.
+Testes parser/sema/codegen/CLI cobrem sufixos, tipos, campos obrigatórios, inferência de null, rejeição FFI, ciclos, unwrap inválido e efeitos lazy/exatamente uma vez. `examples/option.lift` muda contadores para distinguir caminhos e verifica payloads false/zero/string vazia no binário nativo.

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Lift", "scopeName": "source.lift",
+  "patterns": [
+    { "name": "comment.line.double-slash.lift", "match": "//.*$" },
+    { "name": "comment.block.lift", "begin": "/\\*", "end": "\\*/" },
+    { "include": "#strings" },
+    { "name": "keyword.control.lift", "match": "\\b(function|import|export|as|module|from|interface|impl|const|let|if|else|while|return)\\b" },
+    { "name": "storage.type.lift", "match": "\\b(int|number|string|boolean|void|Result)\\b" },
+    { "name": "constant.language.lift", "match": "\\b(true|false|null)\\b" },
+    { "name": "constant.numeric.lift", "match": "\\b[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\b" },
+    { "name": "keyword.operator.lift", "match": "=>|\\?\\?|==|!=|<=|>=|&&|\\|\\||[-+*/%=<>!?]" }
+  ],
+  "repository": {
+    "strings": { "patterns": [
+      { "name": "string.quoted.double.lift", "begin": "\"", "end": "\"|$", "patterns": [{ "name": "constant.character.escape.lift", "match": "\\\\." }] },
+      { "name": "string.quoted.single.lift", "begin": "'", "end": "'|$", "patterns": [{ "name": "constant.character.escape.lift", "match": "\\\\." }] },
+      { "name": "string.template.lift", "begin": "`", "end": "`", "patterns": [
+        { "name": "constant.character.escape.lift", "match": "\\\\." },
+        { "name": "meta.interpolation.lift", "begin": "\\$\\{", "end": "\\}", "patterns": [{ "include": "#braced-expression" }, { "include": "$self" }] }
+      ] }
+    ] },
+    "braced-expression": { "begin": "\\{", "end": "\\}", "patterns": [{ "include": "#braced-expression" }, { "include": "$self" }] }
+  }
+}

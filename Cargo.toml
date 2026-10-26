@@ -1,13 +1,13 @@
 [workspace]
 members = [
-    "crates/truxt_ast",
-    "crates/truxt_lexer",
-    "crates/truxt_parser",
-    "crates/truxt_sema",
-    "crates/truxt_codegen",
-    "crates/truxt_project",
-    "crates/truxt_cli",
-    "stdlib/truxt_core",
+    "crates/lift_ast",
+    "crates/lift_lexer",
+    "crates/lift_parser",
+    "crates/lift_sema",
+    "crates/lift_codegen",
+    "crates/lift_project",
+    "crates/lift_cli",
+    "stdlib/lift_core",
 ]
 resolver = "2"
 
@@ -23,9 +23,9 @@ clap = { version = "4.6.7", features = ["derive"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8.23"
-truxt_ast = { path = "crates/truxt_ast" }
-truxt_lexer = { path = "crates/truxt_lexer" }
-truxt_parser = { path = "crates/truxt_parser" }
-truxt_sema = { path = "crates/truxt_sema" }
-truxt_codegen = { path = "crates/truxt_codegen" }
-truxt_project = { path = "crates/truxt_project" }
+lift_ast = { path = "crates/lift_ast" }
+lift_lexer = { path = "crates/lift_lexer" }
+lift_parser = { path = "crates/lift_parser" }
+lift_sema = { path = "crates/lift_sema" }
+lift_codegen = { path = "crates/lift_codegen" }
+lift_project = { path = "crates/lift_project" }

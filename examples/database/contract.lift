@@ -1,0 +1,71 @@
+// Run against SQLite by default; set LIFT_DB_DRIVER/LIFT_DB_URL for PostgreSQL.
+import function env_or(name: string, fallback: string): Result<string, string> from "lift_core::io::env_or";
+import function exit(code: int): void from "lift_core::io::exit";
+import function create_pool(driver: string, url: string, min_idle: int, max_connections: int, acquire_timeout_ms: int): Result<DbPool, string> from "lift_db::api::create_pool";
+import function execute(pool: DbPool, sql: string, params: DbValue[]): Result<int, string> from "lift_db::api::execute";
+import function query(pool: DbPool, sql: string, params: DbValue[]): Result<DbRows, string> from "lift_db::api::query";
+import function begin(pool: DbPool): Result<DbTransaction, string> from "lift_db::api::begin";
+import function tx_execute(transaction: DbTransaction, sql: string, params: DbValue[]): Result<int, string> from "lift_db::api::tx_execute";
+import function commit(transaction: DbTransaction): Result<void, string> from "lift_db::api::commit";
+import function rollback(transaction: DbTransaction): Result<void, string> from "lift_db::api::rollback";
+import function row_count(rows: DbRows): int from "lift_db::api::row_count";
+import function column_count(rows: DbRows): int from "lift_db::api::column_count";
+import function column_name(rows: DbRows, column: int): Result<string, string> from "lift_db::api::column_name";
+import function get_int(rows: DbRows, row: int, column: int): Result<int, string> from "lift_db::api::get_int";
+import function get_number(rows: DbRows, row: int, column: int): Result<number, string> from "lift_db::api::get_number";
+import function get_text(rows: DbRows, row: int, column: int): Result<string, string> from "lift_db::api::get_text";
+import function get_bool(rows: DbRows, row: int, column: int): Result<boolean, string> from "lift_db::api::get_bool";
+import function is_null(rows: DbRows, row: int, column: int): Result<boolean, string> from "lift_db::api::is_null";
+import function value_int(value: int): DbValue from "lift_db::api::value_int";
+import function value_number(value: number): DbValue from "lift_db::api::value_number";
+import function value_text(value: string): DbValue from "lift_db::api::value_text";
+import function value_bool(value: boolean): DbValue from "lift_db::api::value_bool";
+import function value_null(): DbValue from "lift_db::api::value_null";
+import function close_rows(rows: DbRows): void from "lift_db::api::close_rows";
+import function close_pool(pool: DbPool): void from "lift_db::api::close_pool";
+
+function require(ok: boolean, message: string): void {
+    if !ok { console.log(message); exit(1); }
+}
+function abandon(pool: DbPool): void {
+    const transaction = result.unwrap(begin(pool));
+    result.unwrap(tx_execute(transaction, "INSERT INTO lift_db_contract (id, message) VALUES ($1, $2)", [value_int(3), value_text("drop rollback")]));
+}
+const driver = result.unwrap(env_or("LIFT_DB_DRIVER", "sqlite"));
+const url = result.unwrap(env_or("LIFT_DB_URL", "sqlite:lift-contract.sqlite3"));
+const pool = result.unwrap(create_pool(driver, url, 1, 1, 500));
+result.unwrap(execute(pool, "DROP TABLE IF EXISTS lift_db_contract", []));
+result.unwrap(execute(pool, "CREATE TABLE lift_db_contract (id BIGINT PRIMARY KEY, message TEXT NOT NULL, active BOOLEAN, ratio DOUBLE PRECISION, missing TEXT)", []));
+const text = "literal '); DROP TABLE lift_db_contract; -- 🙂";
+const transaction = result.unwrap(begin(pool));
+require(!result.is_ok(execute(pool, "DELETE FROM lift_db_contract", [])), "pool did not enforce max_connections/acquire timeout");
+result.unwrap(tx_execute(transaction, "INSERT INTO lift_db_contract (id,message,active,ratio,missing) VALUES ($1,$2,$3,$4,$5)", [value_int(1),value_text(text),value_bool(true),value_number(1.5),value_null()]));
+result.unwrap(commit(transaction));
+const rows = result.unwrap(query(pool, "SELECT id,message,active,ratio,missing FROM lift_db_contract ORDER BY id", []));
+require(row_count(rows) == 1 && column_count(rows) == 5, "row/column count mismatch");
+require(result.unwrap(column_name(rows, 1)) == "message", "column metadata mismatch");
+require(result.unwrap(get_int(rows,0,0)) == 1, "int mismatch");
+require(result.unwrap(get_text(rows,0,1)) == text, "text parameter mismatch");
+require(result.unwrap(get_bool(rows,0,2)), "bool parameter mismatch");
+require(result.unwrap(get_number(rows,0,3)) == 1.5, "number parameter mismatch");
+require(result.unwrap(is_null(rows,0,4)), "null parameter mismatch");
+require(!result.is_ok(get_text(rows,0,4)), "null incorrectly converted to text");
+require(!result.is_ok(get_int(rows,2,0)), "out of range getter was accepted");
+const second = result.unwrap(begin(pool));
+result.unwrap(tx_execute(second, "INSERT INTO lift_db_contract (id,message) VALUES ($1,$2)", [value_int(2),value_text("explicit rollback")]));
+result.unwrap(rollback(second));
+close_rows(rows);
+abandon(pool);
+const failed = result.unwrap(begin(pool));
+result.unwrap(tx_execute(failed, "INSERT INTO lift_db_contract (id,message) VALUES ($1,$2)", [value_int(4),value_text("failed commit must rollback")]));
+require(!result.is_ok(tx_execute(failed, "INSERT INTO lift_db_contract (id,message) VALUES ($1,$2)", [value_int(1),value_text("duplicate")])), "expected uniqueness error");
+require(!result.is_ok(commit(failed)), "failed transaction was committed");
+const final_rows = result.unwrap(query(pool, "SELECT id FROM lift_db_contract ORDER BY id", []));
+require(row_count(final_rows) == 1, "rollback/drop leaked uncommitted rows");
+close_rows(final_rows);
+require(!result.is_ok(execute(pool, "BEGIN", [])), "SQL bypassed the transaction protocol");
+const reordered = result.unwrap(query(pool, "SELECT CAST($2 AS TEXT) AS second, CAST($1 AS TEXT) AS first", [value_text("first"),value_text("second")]));
+require(result.unwrap(get_text(reordered,0,0)) == "second" && result.unwrap(get_text(reordered,0,1)) == "first", "parameter order mismatch");
+close_rows(reordered);
+close_pool(pool);
+console.log("PASS: general SQL, pool timeout, typed parameters/getters, materialized rows, commit/rollback/drop");

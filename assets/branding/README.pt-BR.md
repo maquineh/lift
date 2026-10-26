@@ -1,18 +1,17 @@
-# Identidade visual do Truxt e do Forklift
+# Identidade visual do Lift e do Forklift
 
-Estas imagens são os logos do projeto fornecidos pelo mantenedor. Os arquivos
-`.jpg` preservam os dados de imagem JPEG/JFIF enviados; não foram recoloridos ou
-retocados.
+O logo Lift e o ícone Lift em PNG apresentam a identidade nova. O logo
+`forklift.jpg` mostra a empilhadeira levantando o L azul do Lift.
 
-- `truxt.jpg` identifica a linguagem e o compilador Truxt.
+- `lift-logo.png` identifica a linguagem e o compilador Lift.
 - `forklift.jpg` identifica o Forklift, ferramenta de pacotes e dependências
-  do Truxt.
-- `../../editors/vscode/icon.jpg` é a cópia empacotada como ícone da extensão VS Code.
+  do Lift.
+- `../../editors/vscode/icon.png` é o ícone quadrado da extensão VS Code.
 
-![Logo Truxt](truxt.jpg)
+![Logo Lift](lift-logo.png)
 
 ![Logo Forklift](forklift.jpg)
 
-Consulte a [documentação do Truxt](../../README.pt-BR.md) para o estado da
+Consulte a [documentação do Lift](../../README.pt-BR.md) para o estado da
 linguagem e o [guia da extensão VS Code](../../editors/vscode/README.pt-BR.md)
 para configurar o editor.

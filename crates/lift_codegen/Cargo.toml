@@ -1,0 +1,14 @@
+[package]
+name = "lift_codegen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Geração de Rust e manifests Cargo para o Lift"
+
+[dependencies]
+lift_ast.workspace = true
+lift_sema.workspace = true
+
+[dev-dependencies]
+lift_lexer.workspace = true
+lift_parser.workspace = true

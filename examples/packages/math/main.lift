@@ -1,0 +1,8 @@
+import * as base from "base";
+import module "internal.lift";
+
+export function bump(items: int[]): void { base.bump(items); }
+export function sum(items: int[]): int {
+    const item: Item = { value: items[0] + items[1] };
+    return item.get();
+}

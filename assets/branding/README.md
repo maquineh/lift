@@ -1,15 +1,15 @@
-# Truxt and Forklift brand assets
+# Lift and Forklift brand assets
 
-These images are the project logos supplied by the maintainer. The `.jpg` files
-preserve the supplied JPEG/JFIF image data; they are not recolored or retouched.
+The Lift logo and square Lift icon PNGs carry the new language identity. The
+`forklift.jpg` logo shows a forklift raising Lift's blue L.
 
-- `truxt.jpg` identifies the Truxt language and compiler.
-- `forklift.jpg` identifies Forklift, Truxt's package and dependency tool.
-- `../../editors/vscode/icon.jpg` is the copy packaged as the VS Code extension icon.
+- `lift-logo.png` identifies the Lift language and compiler.
+- `forklift.jpg` identifies Forklift, Lift's package and dependency tool.
+- `../../editors/vscode/icon.png` is the square icon packaged with the VS Code extension.
 
-![Truxt logo](truxt.jpg)
+![Lift logo](lift-logo.png)
 
 ![Forklift logo](forklift.jpg)
 
-See [the Truxt documentation](../../README.md) for language status and
+See [the Lift documentation](../../README.md) for language status and
 [the VS Code extension guide](../../editors/vscode/README.md) for editor setup.

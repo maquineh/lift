@@ -1,11 +1,11 @@
 ---
-name: truxt-compiler
-description: Desenvolver, revisar e evoluir o compilador Truxt (.truxt → Rust → binário), preservando seus contratos entre crates, HIR tipado e roadmap incremental. Use ao trabalhar em arquitetura, parser, semântica, codegen, stdlib ou CLI do Truxt.
+name: lift-compiler
+description: Desenvolver, revisar e evoluir o compilador Lift (.lift → Rust → binário), preservando seus contratos entre crates, HIR tipado e roadmap incremental. Use ao trabalhar em arquitetura, parser, semântica, codegen, stdlib ou CLI do Lift.
 ---
 
-# Skill do compilador Truxt
+# Skill do compilador Lift
 
-Use esta skill somente em tarefas do compilador Truxt. Leia [references/architecture.md](references/architecture.md) antes de propor ou alterar contratos do compilador. Ao continuar de uma etapa anterior, consulte os documentos `references/phaseN-decisions.md` correspondentes; eles registram escolhas da implementação, não requisitos do blueprint.
+Use esta skill somente em tarefas do compilador Lift. Leia [references/architecture.md](references/architecture.md) antes de propor ou alterar contratos do compilador. Ao continuar de uma etapa anterior, consulte os documentos `references/phaseN-decisions.md` correspondentes; eles registram escolhas da implementação, não requisitos do blueprint.
 
 O prompt modular chama a criação de codegen/CLI de “Etapa 4”; isso é distinto da “Fase 4” do roadmap, que trata de Optionals e erros. Para a etapa modular, consulte também `references/codegen-cli-decisions.md`.
 
@@ -13,7 +13,7 @@ O prompt modular chama a criação de codegen/CLI de “Etapa 4”; isso é dist
 
 - Inspecione o estado atual do projeto e as instruções locais antes de editar. O blueprint da referência descreve o alvo; não presuma que algo já está implementado.
 - Faça apenas a fase, crate ou correção pedida. Preserve dependências e contratos entre crates; não antecipe funcionalidades de fases futuras como se já fossem parte do MVP.
-- Mantenha `truxt_ast` sem lógica de parsing/semântica e mantenha as decisões semânticas no `truxt_sema`. O codegen consome HIR validado e a CLI orquestra a geração e o Cargo.
+- Mantenha `lift_ast` sem lógica de parsing/semântica e mantenha as decisões semânticas no `lift_sema`. O codegen consome HIR validado e a CLI orquestra a geração e o Cargo.
 - Preserve os invariantes explícitos do HIR na referência. Se uma decisão necessária não estiver especificada, registre a lacuna e escolha a menor decisão local reversível; pergunte ao usuário apenas se a lacuna impedir a tarefa ou mudar comportamento público.
 - Separe requisitos do blueprint, decisões de implementação registradas e recursos ainda não suportados. Revise contraexemplos da fase atual sem exigir que fases futuras já estejam prontas.
 - Não trate sugestões de tradução como garantias de correção. Código Rust emitido precisa respeitar os tipos e modos de passagem definidos pelo HIR.

@@ -2,20 +2,20 @@
 
 [Português do Brasil](project-analysis-and-lsp.pt-BR.md) · [User guide](../README.md)
 
-`truxt_project` is the reusable frontend facade for CLI, HIR lint, and the initial
+`lift_project` is the reusable frontend facade for CLI, HIR lint, and the initial
 LSP. Existing lexer/parser/sema/codegen APIs and HIR semantics remain unchanged.
 Build/check/run consume this facade before their existing Rust/Cargo steps.
 
-The local [Forklift package increment](forklift.md) adds `truxt.toml`, contextual
+The local [Forklift package increment](forklift.md) adds `lift.toml`, contextual
 package analysis, namespaces and exported functions. Existing APIs keep their
 signatures; AST enums gain variants for the new syntax.
 
 ```rust
-use truxt_project::{ProjectSession, lint};
+use lift_project::{ProjectSession, lint};
 
 let mut session = ProjectSession::new();
-session.set_overlay("main.truxt", "console.log(7);".to_owned())?;
-let analysis = session.analyze("main.truxt");
+session.set_overlay("main.lift", "console.log(7);".to_owned())?;
+let analysis = session.analyze("main.lift");
 if let Some(hir) = &analysis.hir {
     let warnings = lint::lint(hir);
     // emit_rust(hir), or consume the typed program in another frontend.
@@ -66,14 +66,14 @@ drive/UNC paths.
 ## Lint
 
 ```sh
-truxt lint examples/modules/main.truxt
-truxt lint --deny-warnings examples/modules/main.truxt
+lift lint examples/modules/main.lift
+lift lint --deny-warnings examples/modules/main.lift
 ```
 
 Lint loads and type-checks the full graph, then reads validated HIR. It does not
-emit Rust, create `.truxt_cache`, or verify Rust imports with Cargo. Warnings exit
+emit Rust, create `.lift_cache`, or verify Rust imports with Cargo. Warnings exit
 0 by default; `--deny-warnings` exits 1 when warnings exist. Source/semantic errors
-always remain errors and exit 1. `truxt check` still validates generated Rust,
+always remain errors and exit 1. `lift check` still validates generated Rust,
 dependency paths and signatures.
 
 | Rule | Advisory behavior |
@@ -87,7 +87,7 @@ ownership/codegen decisions. They also visit local closure bodies.
 
 ## Initial LSP and VS Code
 
-`truxt lsp` serves JSON-RPC over stdio with Content-Length framing and stderr logs.
+`lift lsp` serves JSON-RPC over stdio with Content-Length framing and stderr logs.
 It advertises full-text synchronization and UTF-16 positions. It supports
 initialize/initialized/shutdown/exit, didOpen/didChange/didSave/didClose, and
 workspace/didChangeWatchedFiles. Other requests return method-not-found. It
@@ -117,8 +117,8 @@ currently full and un-debounced.
 
 The local [VS Code extension](../editors/vscode/README.md) includes a stdio client,
 TextMate grammar with template interpolation, comment/bracket rules, and
-check/build/lint/run tasks. Configure `truxt.serverPath` and, for modules,
-`truxt.entry`. The first workspace folder resolves relative entries; routing
+check/build/lint/run tasks. Configure `lift.serverPath` and, for modules,
+`lift.entry`. The first workspace folder resolves relative entries; routing
 multiple projects is not implemented. Tasks consume saved files; LSP consumes
 overlays. Setting changes restart the client. The extension is not published.
 
@@ -126,7 +126,7 @@ overlays. Setting changes restart the client. The extension is not published.
 
 Forklift local path dependencies, manifests and namespaces are now implemented;
 see [its exact scope](forklift.md). Library bindings, external callbacks/async
-and `truxt_web`, then DAP remain next. There is no database driver, web runtime
+and `lift_web`, then DAP remain next. There is no database driver, web runtime
 or debugger. PostgreSQL 8.4/9.1
 compatibility must be validated before choosing a driver; modern driver support
 for those servers is not assumed.

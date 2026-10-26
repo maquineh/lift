@@ -1,0 +1,26 @@
+[package]
+name = "lift_cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "CLI do compilador Lift"
+default-run = "lift"
+
+[[bin]]
+name = "lift"
+path = "src/main.rs"
+
+[[bin]]
+name = "forklift"
+path = "src/forklift.rs"
+
+[dependencies]
+ariadne.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+lift_ast.workspace = true
+lift_codegen.workspace = true
+lift_lexer.workspace = true
+lift_parser.workspace = true
+lift_sema.workspace = true
+lift_project.workspace = true

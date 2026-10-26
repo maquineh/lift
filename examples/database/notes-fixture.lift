@@ -1,0 +1,16 @@
+// Acceptance-only fixture. Use a dedicated disposable database.
+import function env_or(name: string, fallback: string): Result<string, string> from "lift_core::io::env_or";
+import function create_pool(driver: string, url: string, min_idle: int, max_connections: int, acquire_timeout_ms: int): Result<DbPool, string> from "lift_db::api::create_pool";
+import function execute(pool: DbPool, sql: string, params: DbValue[]): Result<int, string> from "lift_db::api::execute";
+import function value_text(value: string): DbValue from "lift_db::api::value_text";
+import function close_pool(pool: DbPool): void from "lift_db::api::close_pool";
+const driver = result.unwrap(env_or("LIFT_DB_DRIVER", "sqlite"));
+const url = result.unwrap(env_or("LIFT_DB_URL", "sqlite:lift-fixture.sqlite3"));
+const mode = result.unwrap(env_or("LIFT_TEST_FIXTURE_MODE", "clean"));
+const pool = result.unwrap(create_pool(driver,url,1,1,1000));
+result.unwrap(execute(pool,"DROP TABLE IF EXISTS notes",[]));
+if mode == "bad" {
+    result.unwrap(execute(pool,"CREATE TABLE notes (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL)",[]));
+    result.unwrap(execute(pool,"INSERT INTO notes (id,body) VALUES ($1,$2)",[value_text("invalid"),value_text("fixture")]));
+}
+close_pool(pool);

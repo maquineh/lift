@@ -1,12 +1,12 @@
 # Métodos, closures e templates v1
 
 Rust/Cargo **1.94.1+** é obrigatório para compilador, core embutido e projetos
-gerados. Este é um subconjunto definido do Truxt, sem compatibilidade completa
-com TypeScript. Execute `cargo run -p truxt_cli -- run examples/methods-closures-templates.truxt`.
+gerados. Este é um subconjunto definido do Lift, sem compatibilidade completa
+com TypeScript. Execute `cargo run -p lift_cli -- run examples/methods-closures-templates.lift`.
 
 ## Métodos nominais
 
-```truxt
+```lift
 interface Counter { value: int }
 impl Counter {
     add(n: int): int { this.value = this.value + n; return this.value; }
@@ -28,7 +28,7 @@ A semântica cria uma função interna e insere `this` como primeiro argumento H
 antes da análise comum de ownership/aliasing. Leitura empresta o receiver;
 mutação o empresta mutavelmente. Retornar `this` clona um snapshot owned, mantendo
 o efeito da mutação no receiver do chamador. Outros parâmetros preservam as
-regras de valor/cópia do Truxt, incluindo clone para parâmetros owned não-Copy.
+regras de valor/cópia do Lift, incluindo clone para parâmetros owned não-Copy.
 O receiver é avaliado antes dos argumentos; staging existente materializa
 leituras/efeitos conflitantes antes do empréstimo final. `c.add(c.value)` e
 `c.add(c.add(1))` são compilados no E2E; dois argumentos mutáveis simultâneos com
@@ -41,7 +41,7 @@ mutável mesmo quando outro tipo nominal possui esse método.
 
 ## Arrow closures locais
 
-```truxt
+```lift
 let text = "antes";
 const snapshot = (): string => text;
 text = "depois";
@@ -80,7 +80,7 @@ nem moves de último uso calculados para o chamador.
 
 ## Template strings
 
-```truxt
+```lift
 console.log(`valor ${c.value}, aninhado ${`ok ${true}`}`);
 console.log(`literal \${text}, crase \` e quebra\n`);
 ```

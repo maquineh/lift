@@ -1,0 +1,33 @@
+import function open(path: string): Result<SqliteConnection, string> from "lift_db::resource::open";
+import function begin(connection: SqliteConnection): Result<SqliteTransaction, string> from "lift_db::resource::begin";
+import function insert(transaction: SqliteTransaction, body: string): Result<int, string> from "lift_db::resource::insert";
+import function commit(transaction: SqliteTransaction): Result<SqliteConnection, string> from "lift_db::resource::commit";
+import function rollback(transaction: SqliteTransaction): Result<SqliteConnection, string> from "lift_db::resource::rollback";
+import function list(connection: SqliteConnection): Result<string, string> from "lift_db::resource::list";
+import function close(connection: SqliteConnection): void from "lift_db::resource::close";
+
+function abandon_transaction(): void {
+    const connection = result.unwrap(open("lift-resources.sqlite3"));
+    const transaction = result.unwrap(begin(connection));
+    console.log(result.unwrap(insert(transaction, "dropped transaction")));
+}
+
+const opened = open("lift-resources.sqlite3");
+if result.is_ok(opened) {
+    const connection = result.unwrap(opened);
+    const transaction = result.unwrap(begin(connection));
+    console.log(result.unwrap(insert(transaction, "committed Lift resource")));
+    const saved = result.unwrap(commit(transaction));
+    console.log(result.unwrap(list(saved)));
+    const discarded = result.unwrap(begin(saved));
+    console.log(result.unwrap(insert(discarded, "rolled back")));
+    const restored = result.unwrap(rollback(discarded));
+    console.log(result.unwrap(list(restored)));
+    close(restored);
+    abandon_transaction();
+    const reopened = result.unwrap(open("lift-resources.sqlite3"));
+    console.log(result.unwrap(list(reopened)));
+    close(reopened);
+} else {
+    console.log(result.unwrap_err(opened));
+}

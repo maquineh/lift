@@ -1,0 +1,8 @@
+[package]
+name = "lift_core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Biblioteca base Rust do Lift: Console, arrays e strings"
+
+[dependencies]

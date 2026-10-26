@@ -1,6 +1,6 @@
 # Decisões registradas na Fase 3
 
-Este documento registra a primeira implementação de `truxt_sema`. O blueprint continua sendo a referência para contratos; estes itens delimitam o comportamento implementado e não ampliam silenciosamente a linguagem.
+Este documento registra a primeira implementação de `lift_sema`. O blueprint continua sendo a referência para contratos; estes itens delimitam o comportamento implementado e não ampliam silenciosamente a linguagem.
 
 ## Tipos e checagem
 
@@ -20,7 +20,7 @@ Este documento registra a primeira implementação de `truxt_sema`. O blueprint 
 - Funções e interfaces são pré-declaradas, permitindo chamadas adiantadas e recursão.
 - Variáveis locais usam escopos lexicais, mas uma declaração não pode sombrear qualquer binding ainda ativo. Reutilizar o nome depois que o escopo anterior termina é permitido.
 - Statements de topo compartilham um escopo de script e podem usar bindings anteriores. Funções não capturam bindings de topo.
-- `const` impede reatribuição do binding. Projeções de agregados (`obj.campo`, `array[i]`) ainda podem ser alteradas; o HIR marca `requires_mut_binding` para o detalhe Rust `let mut` sem permitir rebinding Truxt.
+- `const` impede reatribuição do binding. Projeções de agregados (`obj.campo`, `array[i]`) ainda podem ser alteradas; o HIR marca `requires_mut_binding` para o detalhe Rust `let mut` sem permitir rebinding Lift.
 - Reatribuição direta de parâmetro é rejeitada. Alterar campo/elemento de parâmetro é distinto e participa da inferência de modo.
 
 ## Ownership desta implementação
@@ -44,7 +44,7 @@ Este documento registra a primeira implementação de `truxt_sema`. O blueprint 
 - `SemaError` carrega categoria, mensagem, span principal e span secundário opcional. A CLI renderiza esses dados com Ariadne em modo Byte; a crate semântica continua independente da apresentação.
 - Um HIR válido não contém `Unknown`/tipos de erro. Se qualquer erro for encontrado, `analyze` retorna a lista de erros, sem HIR parcial.
 - A análise não prova segurança geral do Borrow Checker e não confirma que o codegen Rust compila. Isso depende do codegen e de validação explícita em etapa posterior.
-- Os testes de `truxt_sema` cobrem recursão, resolução de tipos, modos de empréstimo, conflito de duas referências mutáveis à mesma raiz e diagnósticos de tipos/inteiros. A CLI compila e executa exemplos de Fibonacci e ownership; essa validação abrange esses casos, não todas as combinações de HIR.
+- Os testes de `lift_sema` cobrem recursão, resolução de tipos, modos de empréstimo, conflito de duas referências mutáveis à mesma raiz e diagnósticos de tipos/inteiros. A CLI compila e executa exemplos de Fibonacci e ownership; essa validação abrange esses casos, não todas as combinações de HIR.
 
 ## Revisão da proposta BorrowInferEngine
 

@@ -1,9 +1,0 @@
-// EN: Imported files expose declarations to the shared global symbol table.
-// PT-BR: Arquivos importados expõem declarações na tabela global compartilhada.
-import function clean(value: string): string from "truxt_core::interop::string_trim";
-
-interface Product { name: string, value: int }
-
-function make_product(name: string, value: int): Product {
-    return { name: clean(name), value: value };
-}
