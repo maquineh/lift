@@ -26,11 +26,14 @@ try {
     $isWindowsHost = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
     $executableName = if ($isWindowsHost) { "truxt.exe" } else { "truxt" }
     $executable = Join-Path $targetDirectory "$hostTriple/release/$executableName"
+    $forkliftName = if ($isWindowsHost) { "forklift.exe" } else { "forklift" }
+    $forkliftExecutable = Join-Path $targetDirectory "$hostTriple/release/$forkliftName"
     New-Item -ItemType Directory -Path $distributionRoot -Force | Out-Null
     $stagingDirectory = [System.IO.Path]::GetFullPath((Join-Path $distributionRoot (".truxt-package-" + [guid]::NewGuid().ToString("N"))))
     New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
     try {
         Copy-Item -LiteralPath $executable -Destination $stagingDirectory
+        Copy-Item -LiteralPath $forkliftExecutable -Destination $stagingDirectory
         Copy-Item -LiteralPath (Join-Path $projectRoot "README.md"), (Join-Path $projectRoot "README.pt-BR.md") -Destination $stagingDirectory
         Copy-Item -LiteralPath (Join-Path $projectRoot "docs") -Destination $stagingDirectory -Recurse
         $examplesDirectory = Join-Path $stagingDirectory "examples"
@@ -38,7 +41,7 @@ try {
         $examplesSourceDirectory = Join-Path $projectRoot "examples"
         # EN: Preserve imported modules' relative paths and copy source files only.
         # PT-BR: Preserva caminhos relativos dos módulos e copia apenas fontes.
-        Get-ChildItem -LiteralPath $examplesSourceDirectory -Filter "*.truxt" -File -Recurse | ForEach-Object {
+        Get-ChildItem -LiteralPath $examplesSourceDirectory -File -Recurse | Where-Object { $_.Extension -eq ".truxt" -or $_.Name -eq "truxt.toml" } | ForEach-Object {
             $exampleRelativePath = $_.FullName.Substring($examplesSourceDirectory.Length + 1)
             $exampleDestination = Join-Path $examplesDirectory $exampleRelativePath
             New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($exampleDestination)) -Force | Out-Null

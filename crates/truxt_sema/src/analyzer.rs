@@ -179,21 +179,21 @@ struct StructInfo {
 }
 
 #[derive(Clone)]
-struct ParameterInfo {
-    name: String,
-    ty: ResolvedType,
-    span: Span,
-    pass_mode: ParameterPassMode,
-    mutated: bool,
+pub(super) struct ParameterInfo {
+    pub(super) name: String,
+    pub(super) ty: ResolvedType,
+    pub(super) span: Span,
+    pub(super) pass_mode: ParameterPassMode,
+    pub(super) mutated: bool,
 }
 
 #[derive(Clone)]
-struct FunctionInfo {
-    name: String,
-    parameters: Vec<ParameterInfo>,
-    return_type: ResolvedType,
-    has_explicit_return_type: bool,
-    span: Span,
+pub(super) struct FunctionInfo {
+    pub(super) name: String,
+    pub(super) parameters: Vec<ParameterInfo>,
+    pub(super) return_type: ResolvedType,
+    pub(super) has_explicit_return_type: bool,
+    pub(super) span: Span,
 }
 
 #[derive(Clone)]
@@ -221,26 +221,37 @@ struct Analyzer<'ast> {
 /// Constrói HIR tipado. Um `Ok` nunca contém tipo desconhecido nem recurso
 /// da AST que ainda não tenha suporte semântico.
 pub fn analyze(ast: ProgramAst) -> Result<HirProgram, Vec<SemaError>> {
+    analyze_context(ast, HashMap::new())
+}
+
+pub(super) fn analyze_context(
+    ast: ProgramAst,
+    external: HashMap<String, FunctionInfo>,
+) -> Result<HirProgram, Vec<SemaError>> {
     let ast = lower_impls(ast)?;
     let unresolved = ast
         .declarations
         .iter()
-        .filter_map(|declaration| {
-            if let Declaration::ModuleImport(import) = declaration {
-                Some(SemaError::new(
-                    SemaErrorKind::InvalidImport,
-                    "imports de módulo devem ser resolvidos antes da análise semântica",
-                    import.span,
-                ))
-            } else {
-                None
-            }
+        .filter_map(|declaration| match declaration {
+            Declaration::ModuleImport(import) => Some(SemaError::new(
+                SemaErrorKind::InvalidImport,
+                "imports de módulo devem ser resolvidos antes da análise semântica",
+                import.span,
+            )),
+            Declaration::PackageImport(_) | Declaration::ExportFunction(_) => Some(SemaError::new(
+                SemaErrorKind::InvalidPackage,
+                "imports/exports de pacote exigem contexto de projeto manifestado",
+                declaration.span(),
+            )),
+            _ => None,
         })
         .collect::<Vec<_>>();
     if !unresolved.is_empty() {
         return Err(unresolved);
     }
-    Analyzer::new(&ast).run()
+    let mut analyzer = Analyzer::new(&ast);
+    analyzer.functions = external;
+    analyzer.run()
 }
 
 impl<'ast> Analyzer<'ast> {
@@ -315,6 +326,9 @@ impl<'ast> Analyzer<'ast> {
         for (index, declaration) in self.ast.declarations.iter().enumerate() {
             match declaration {
                 Declaration::ModuleImport(_) => {}
+                Declaration::PackageImport(_) | Declaration::ExportFunction(_) => {
+                    unreachable!("package syntax resolved before analysis")
+                }
                 Declaration::Impl(_) => unreachable!("impl lowered before analysis"),
                 Declaration::Import(_) => {
                     if let Some(item) = self.import_by_declaration.get(&index) {
@@ -458,6 +472,9 @@ impl<'ast> Analyzer<'ast> {
                     }
                 }
                 Declaration::Statement(_) | Declaration::ModuleImport(_) => {}
+                Declaration::PackageImport(_) | Declaration::ExportFunction(_) => {
+                    unreachable!("package syntax resolved before analysis")
+                }
                 Declaration::Impl(_) => unreachable!("impl lowered before analysis"),
             }
         }
@@ -679,10 +696,13 @@ impl<'ast> Analyzer<'ast> {
                 .iter()
                 .map(|(index, info)| (*index, info.clone()))
                 .collect::<HashMap<_, _>>();
-            let by_name = modes
-                .values()
-                .map(|info| (info.name.clone(), info.clone()))
-                .collect::<HashMap<_, _>>();
+            let mut by_name = self.functions.clone();
+            by_name.extend(
+                modes
+                    .values()
+                    .map(|info| (info.name.clone(), info.clone()))
+                    .collect::<HashMap<_, _>>(),
+            );
             let mut promotions = Vec::<(usize, String)>::new();
 
             for (index, declaration) in &function_decls {
@@ -1840,7 +1860,18 @@ impl<'a> BodyChecker<'a> {
             span,
         };
         let mut mutated = HashSet::new();
-        collect_forwarded_mut_parameters(&closure.body, &signature, self.functions, &mut mutated);
+        let mut summary_functions = self.functions.clone();
+        for scope in &self.scopes {
+            for name in scope.keys() {
+                hide_namespace(&mut summary_functions, name);
+            }
+        }
+        collect_forwarded_mut_parameters(
+            &closure.body,
+            &signature,
+            &summary_functions,
+            &mut mutated,
+        );
         for p in &closure.parameters {
             if block_mutates_name(&closure.body, &p.name.name) {
                 mutated.insert(p.name.name.clone());
@@ -1955,6 +1986,36 @@ impl<'a> BodyChecker<'a> {
         span: Span,
         call: &truxt_ast::CallExpression,
     ) -> Result<HirExpr, SemaError> {
+        if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
+            if let Some(alias) = direct_callee_name(&access.object) {
+                if self.lookup(&alias).is_none()
+                    && self.functions.contains_key(&format!("{alias}."))
+                {
+                    let name = format!("{alias}.{}", access.field.name);
+                    if !self.functions.contains_key(&name) {
+                        return Err(SemaError::new(
+                            SemaErrorKind::PrivatePackageMember,
+                            format!("função `{name}` ausente ou não exportada pelo pacote"),
+                            access.field.span,
+                        ));
+                    }
+                    return self.check_call(
+                        span,
+                        &truxt_ast::CallExpression {
+                            callee: Box::new(Expression {
+                                kind: ExpressionKind::Identifier(Identifier {
+                                    name,
+                                    span: call.callee.span,
+                                }),
+                                span: call.callee.span,
+                            }),
+                            arguments: call.arguments.clone(),
+                            span: call.span,
+                        },
+                    );
+                }
+            }
+        }
         let closure_callee = match &call.callee.kind {
             ExpressionKind::Closure(_) => Some(self.synthesize_expr(&call.callee)?),
             ExpressionKind::Identifier(name)
@@ -2219,7 +2280,7 @@ impl<'a> BodyChecker<'a> {
         self.resolve_call_aliasing(&mut arguments)?;
         Ok(self.expr(
             HirExprKind::Call {
-                function: callee,
+                function: function.name,
                 arguments,
             },
             function.return_type,
@@ -2947,7 +3008,12 @@ fn collect_forwarded_mut_parameters(
     functions: &HashMap<String, FunctionInfo>,
     needs_mut: &mut HashSet<String>,
 ) {
+    let mut visible = functions.clone();
+    for parameter in &caller.parameters {
+        hide_namespace(&mut visible, &parameter.name);
+    }
     for statement in &block.statements {
+        let functions = &visible;
         match statement {
             Statement::Variable(variable) => {
                 collect_forwarded_mut_expr(&variable.initializer, caller, functions, needs_mut)
@@ -2972,7 +3038,15 @@ fn collect_forwarded_mut_parameters(
                 collect_forwarded_mut_expr(&statement.expression, caller, functions, needs_mut)
             }
         }
+        if let Statement::Variable(variable) = statement {
+            hide_namespace(&mut visible, &variable.name.name);
+        }
     }
+}
+
+fn hide_namespace(functions: &mut HashMap<String, FunctionInfo>, name: &str) {
+    let prefix = format!("{name}.");
+    functions.retain(|key, _| !key.starts_with(&prefix));
 }
 
 fn collect_forwarded_mut_if(
@@ -3010,34 +3084,54 @@ fn collect_forwarded_mut_expr(
         }
         ExpressionKind::Call(call) => {
             if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
-                // Conservatively union same-named method summaries for projections.
-                let suffix = format!(":{}", access.field.name);
-                let exact = direct_callee_name(&access.object)
-                    .and_then(|name| caller.parameters.iter().find(|p| p.name == name))
-                    .and_then(|p| {
-                        if let ResolvedType::Struct(target) = &p.ty {
-                            Some(method_name(target, &access.field.name))
-                        } else {
-                            None
+                let namespace = direct_callee_name(&access.object)
+                    .filter(|name| functions.contains_key(&format!("{name}.")));
+                if let Some(alias) = namespace {
+                    if let Some(callee) = functions.get(&format!("{alias}.{}", access.field.name)) {
+                        for (argument, parameter) in call.arguments.iter().zip(&callee.parameters) {
+                            if parameter.pass_mode == ParameterPassMode::BorrowMut {
+                                if let Some(root) = root_name(argument) {
+                                    if caller
+                                        .parameters
+                                        .iter()
+                                        .any(|p| p.name == root && !p.ty.is_copy())
+                                    {
+                                        needs_mut.insert(root.to_owned());
+                                    }
+                                }
+                            }
                         }
-                    });
-                for method in functions.values().filter(|f| {
-                    exact.as_ref().map_or_else(
-                        || f.name.starts_with("$method:") && f.name.ends_with(&suffix),
-                        |name| &f.name == name,
-                    )
-                }) {
-                    let arguments =
-                        std::iter::once(access.object.as_ref()).chain(call.arguments.iter());
-                    for (argument, parameter) in arguments.zip(&method.parameters) {
-                        if parameter.pass_mode == ParameterPassMode::BorrowMut {
-                            if let Some(root) = root_name(argument) {
-                                if caller
-                                    .parameters
-                                    .iter()
-                                    .any(|p| p.name == root && !p.ty.is_copy())
-                                {
-                                    needs_mut.insert(root.to_owned());
+                    }
+                } else {
+                    // Conservatively union same-named method summaries for projections.
+                    let suffix = format!(":{}", access.field.name);
+                    let exact = direct_callee_name(&access.object)
+                        .and_then(|name| caller.parameters.iter().find(|p| p.name == name))
+                        .and_then(|p| {
+                            if let ResolvedType::Struct(target) = &p.ty {
+                                Some(method_name(target, &access.field.name))
+                            } else {
+                                None
+                            }
+                        });
+                    for method in functions.values().filter(|f| {
+                        exact.as_ref().map_or_else(
+                            || f.name.starts_with("$method:") && f.name.ends_with(&suffix),
+                            |name| &f.name == name,
+                        )
+                    }) {
+                        let arguments =
+                            std::iter::once(access.object.as_ref()).chain(call.arguments.iter());
+                        for (argument, parameter) in arguments.zip(&method.parameters) {
+                            if parameter.pass_mode == ParameterPassMode::BorrowMut {
+                                if let Some(root) = root_name(argument) {
+                                    if caller
+                                        .parameters
+                                        .iter()
+                                        .any(|p| p.name == root && !p.ty.is_copy())
+                                    {
+                                        needs_mut.insert(root.to_owned());
+                                    }
                                 }
                             }
                         }

@@ -84,6 +84,54 @@ impl<'tokens> Parser<'tokens> {
 
     fn parse_declaration(&mut self) -> Result<Declaration, ParseError> {
         match self.current() {
+            Some(Token::Identifier(name)) if name == "export" && self.check_n(1, is_function) => {
+                let start = self.current_span().start;
+                self.advance();
+                let mut function = self.parse_function_declaration()?;
+                function.span.start = start;
+                Ok(Declaration::ExportFunction(function))
+            }
+            Some(Token::Identifier(name))
+                if name == "export"
+                    && self.check_n(1, |token| {
+                        matches!(
+                            token,
+                            Token::Interface
+                                | Token::Const
+                                | Token::Let
+                                | Token::Impl
+                                | Token::Import
+                        )
+                    }) =>
+            {
+                Err(self.error("`export function` (outros exports não são suportados)"))
+            }
+            Some(Token::Import) if self.check_n(1, |token| matches!(token, Token::Star)) => {
+                let start = self.current_span().start;
+                self.advance();
+                self.advance();
+                self.expect(
+                    |token| matches!(token, Token::Identifier(name) if name == "as"),
+                    "`as`",
+                )?;
+                let alias = self.parse_identifier()?;
+                self.expect(|token| matches!(token, Token::From), "`from`")?;
+                let dependency_span = self.current_span();
+                let dependency = match self.current() {
+                    Some(Token::StringLiteral(name)) => name.clone(),
+                    _ => return Err(self.error("nome de dependência entre aspas")),
+                };
+                self.advance();
+                let end = self.expect(is_semicolon, "`;`")?.end;
+                Ok(Declaration::PackageImport(
+                    truxt_ast::PackageImportDeclaration {
+                        alias,
+                        dependency,
+                        dependency_span,
+                        span: self.span(start, end),
+                    },
+                ))
+            }
             Some(Token::Impl) => {
                 let start = self.current_span().start;
                 self.advance();

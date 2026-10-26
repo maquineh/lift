@@ -11,7 +11,7 @@ The compiler pipeline is `.truxt` → tokens → untyped AST → validated typed
 | `Cargo.toml` | Workspace members, shared version/edition, dependencies between compiler crates. |
 | `Cargo.lock` | Locked compiler dependency graph; install and package commands use `--locked`. |
 | `.gitignore` | Exclude compiler artifacts, generated projects at every depth, native example binaries, and distribution ZIPs. |
-| `crates/*/Cargo.toml` | Each compiler crate's dependencies; `truxt_cli` also declares the `truxt` executable. |
+| `crates/*/Cargo.toml` | Each compiler crate's dependencies; `truxt_cli` declares the `truxt` and `forklift` executables. |
 | `crates/truxt_ast/src/lib.rs` | Untyped declarations, statements, expressions, imports, and type syntax, including special `Result<T, E>` types. No parsing or semantics. |
 | `crates/truxt_ast/src/span.rs` | SourceId plus half-open UTF-8 byte spans; legacy source-zero constructors and same-file joins. |
 | `crates/truxt_lexer/src/lib.rs` | Logos tokens, lexical errors, byte offsets, raw string-escape text, and lexer unit tests. |
@@ -25,8 +25,13 @@ The compiler pipeline is `.truxt` → tokens → untyped AST → validated typed
 | `crates/truxt_codegen/src/lib.rs` | Emit Rust and Cargo manifests from validated HIR, including clones, evaluation temporaries, safe FFI wrappers, and Result inspection. |
 | `crates/truxt_cli/src/lib.rs` | Commands, source diagnostics, embedded-core extraction, generated projects, Cargo invocation, artifact lookup, and program execution. |
 | `crates/truxt_cli/src/diagnostics.rs` | Ariadne 0.6 reports using byte-indexed spans, optional related labels, terminal color policy, and renderer unit tests. |
-| `crates/truxt_cli/src/sources.rs` | Own canonical source paths/text, assigning unique SourceIds for one compilation. |
-| `crates/truxt_cli/src/modules.rs` | Resolve relative source imports, canonical deduplication/cycles, root-only statements, and AST flattening. |
+| `crates/truxt_project/src/sources.rs` | Own source paths/text and SourceIds; UTF-16 positions with LF/CRLF/CR. |
+| `crates/truxt_project/src/modules.rs` | Legacy relative source loading and dispatch to manifested project analysis. |
+| `crates/truxt_project/src/lib.rs` | Reusable sessions, stable overlays, SourceMap/HIR/diagnostic results. |
+| `crates/truxt_project/src/forklift.rs` | Local manifests, canonical package identities, dependencies, boundaries and captured resolution. |
+| `crates/truxt_project/src/lint.rs`, `diagnostics.rs` | Advisory HIR rules and explicit stable semantic diagnostic codes. |
+| `crates/truxt_sema/src/packages.rs` | Filesystem-free contextual analysis, exports, package-qualified HIR and global binding identities. |
+| `crates/truxt_cli/src/lsp.rs`, `forklift.rs` | Diagnostic JSON-RPC server and local Forklift CLI entry. |
 | `crates/truxt_cli/src/main.rs` | Forward the CLI result as the process exit code. |
 
 AST and HIR nodes retain source spans. `analyze` never returns partial HIR after an error. Code generation consumes semantic decisions rather than inferring ownership again. The core's embedded source list is explicit in the CLI; add any new core module there as well.
@@ -81,4 +86,4 @@ Unit tests remain alongside span, lexer, and standard-library implementations. R
 
 Internal records live in `.agents/skills/truxt-compiler/`: `SKILL.md` defines contributor workflow; `references/architecture.md` is the original target blueprint; phase 1/2/3 records describe implemented syntax and semantics; `codegen-cli-decisions.md` records lowering/Cargo behavior; `phase5-decisions.md` records the limited safe import and console contract. The current user-facing Result/I/O contract is documented in `docs/result-and-io.md` and its Portuguese counterpart. A roadmap item in the blueprint does not mean that it is implemented.
 
-Diagnostics/output reuse are documented in `docs/diagnostics-and-build.md`. Explicit multi-file imports and source identity are documented in `docs/modules.md`; both have Portuguese counterparts. Project manifests, namespaces, and dependency-keyed caching remain future work.
+Diagnostics/output reuse are documented in `docs/diagnostics-and-build.md`. Legacy file modules are in `docs/modules.md`; sessions/lint/LSP in `docs/project-analysis-and-lsp.md`; local manifests/namespaces in `docs/forklift.md`. Each has a Portuguese counterpart. The package/API contract tests and `examples/packages/app` cover the local package increment. Dependency-keyed caching remains future work.

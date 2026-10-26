@@ -2,6 +2,10 @@
 
 [Português do Brasil](modules.pt-BR.md) · [User guide](../README.md)
 
+This document describes legacy flat file imports, preserved without a manifest.
+The separate [Forklift increment](forklift.md) adds `truxt.toml`, package
+namespaces and exported functions; its file modules remain flat within each package.
+
 `import module "relative.truxt";` is a top-level declaration, parsed separately from Rust FFI imports. The semicolon is required. `module` is contextual here and remains available as an ordinary identifier elsewhere. Nested imports, aliases, namespaces, exports, package search paths, and a project manifest are outside this increment.
 
 Each path is relative to the importing source file, independently of the caller's current directory. It must have a `.truxt` extension (case-insensitive, consistent with CLI entry-file validation). Absolute/rooted paths and drive-qualified paths are rejected. `..` is allowed. Specifiers use their literal token text with no interpolation or runtime string-escape decoding; use `/` for portable paths.

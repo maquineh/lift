@@ -33,6 +33,8 @@ pub enum Declaration {
     Function(FunctionDeclaration),
     Import(ImportFunctionDeclaration),
     ModuleImport(ModuleImportDeclaration),
+    PackageImport(PackageImportDeclaration),
+    ExportFunction(FunctionDeclaration),
     Statement(Statement),
 }
 
@@ -44,9 +46,44 @@ impl Declaration {
             Self::Function(node) => node.span,
             Self::Import(node) => node.span,
             Self::ModuleImport(node) => node.span,
+            Self::PackageImport(node) => node.span,
+            Self::ExportFunction(node) => node.span,
             Self::Statement(node) => node.span(),
         }
     }
+}
+
+/// Package identity within one contextual analysis, assigned by the resolver.
+/// PT-BR: Identidade de pacote numa análise contextual, atribuída pelo resolvedor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PackageId(pub usize);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectAst {
+    pub root: PackageId,
+    pub packages: Vec<PackageAst>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackageAst {
+    pub id: PackageId,
+    pub program: ProgramAst,
+    pub is_library: bool,
+    pub imports: Vec<PackageBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackageBinding {
+    pub alias: Identifier,
+    pub target: PackageId,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackageImportDeclaration {
+    pub alias: Identifier,
+    pub dependency: String,
+    pub dependency_span: Span,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq)]

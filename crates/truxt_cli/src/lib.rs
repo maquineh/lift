@@ -19,11 +19,11 @@ use std::{
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use truxt_codegen::{emit_cargo_manifest_for_program, emit_rust};
-use truxt_sema::{analyze, HirProgram};
+use truxt_project::{ProjectSession, Severity};
+use truxt_sema::HirProgram;
 
 mod diagnostics;
-mod modules;
-mod sources;
+mod lsp;
 use diagnostics::report_diagnostic;
 
 const EMBEDDED_CORE_FILES: &[(&str, &str)] = &[
@@ -87,12 +87,236 @@ enum Commands {
         /// Arquivo fonte `.truxt`.
         input: PathBuf,
     },
+    /// Analisa fontes e emite avisos HIR sem gerar Rust ou chamar Cargo.
+    Lint {
+        input: PathBuf,
+        #[arg(long)]
+        deny_warnings: bool,
+    },
+    /// Inicia o servidor de linguagem via JSON-RPC em stdio.
+    Lsp,
     /// Cria um diretório com um arquivo `main.truxt` inicial.
     Init {
         /// Diretório destino (padrão: diretório atual).
         #[arg(default_value = ".")]
         directory: PathBuf,
     },
+}
+
+#[derive(Parser)]
+#[command(
+    name = "forklift",
+    version,
+    about = "Pacotes Truxt locais por path (sem registry)"
+)]
+struct ForkliftCli {
+    #[command(subcommand)]
+    command: ForkliftCommands,
+}
+
+#[derive(Subcommand)]
+enum ForkliftCommands {
+    /// Cria truxt.toml e main.truxt sem sobrescrever arquivos.
+    Init {
+        #[arg(default_value = ".")]
+        directory: PathBuf,
+        #[arg(long)]
+        lib: bool,
+    },
+    /// Valida/carrega o grafo de pacotes locais sem chamar Cargo.
+    Resolve {
+        #[arg(default_value = ".")]
+        project: PathBuf,
+    },
+    /// Analisa o projeto e valida o Rust gerado com Cargo.
+    Check {
+        #[arg(default_value = ".")]
+        project: PathBuf,
+    },
+    /// Compila um projeto bin em release.
+    Build {
+        #[arg(default_value = ".")]
+        project: PathBuf,
+    },
+    /// Compila e executa o projeto bin.
+    Run {
+        #[arg(default_value = ".")]
+        project: PathBuf,
+        #[arg(last = true)]
+        args: Vec<OsString>,
+    },
+}
+
+/// Execute the local-only Forklift package CLI using the same analysis/build API.
+/// PT-BR: Executa Forklift local com as mesmas APIs de análise/build.
+pub fn execute_forklift() -> u8 {
+    match dispatch_forklift(ForkliftCli::parse().command) {
+        Ok(code) => code,
+        Err(CliError::Message(message)) => {
+            eprintln!("forklift: {message}");
+            1
+        }
+        Err(CliError::DiagnosticsReported) => 1,
+    }
+}
+
+fn dispatch_forklift(command: ForkliftCommands) -> Result<u8, CliError> {
+    if let ForkliftCommands::Init { directory, lib } = command {
+        init_package(&directory, lib)?;
+        return Ok(0);
+    }
+    let project = match &command {
+        ForkliftCommands::Resolve { project }
+        | ForkliftCommands::Check { project }
+        | ForkliftCommands::Build { project }
+        | ForkliftCommands::Run { project, .. } => project,
+        ForkliftCommands::Init { .. } => unreachable!(),
+    };
+    let resolved = ProjectSession::new().resolve(project);
+    for diagnostic in &resolved.diagnostics {
+        report_diagnostic(&resolved.sources, diagnostic);
+    }
+    let ast = resolved
+        .project
+        .as_ref()
+        .ok_or(CliError::DiagnosticsReported)?;
+    let root_is_library = resolved
+        .packages
+        .iter()
+        .find(|p| p.id == ast.root)
+        .ok_or_else(|| CliError::message("pacote root não resolvido"))?
+        .is_library;
+    match command {
+        ForkliftCommands::Resolve { .. } => {
+            let mut packages: Vec<_> = resolved.packages.iter().collect();
+            packages.sort_by_key(|p| p.id);
+            for package in packages {
+                println!(
+                    "{} {} ({}) [{}] {}",
+                    package.name,
+                    package.version,
+                    if package.is_library { "lib" } else { "bin" },
+                    package.id.0,
+                    package.manifest.display()
+                );
+                for (alias, target) in &package.dependencies {
+                    println!("  {alias} -> [{}]", target.0);
+                }
+            }
+            Ok(0)
+        }
+        ForkliftCommands::Check { .. } => cargo_check(&generate_analysis(resolved.analyze())?),
+        ForkliftCommands::Build { .. } if !root_is_library => {
+            build_generated(generate_analysis(resolved.analyze())?)
+        }
+        ForkliftCommands::Run { args, .. } if !root_is_library => {
+            run_generated(generate_analysis(resolved.analyze())?, args)
+        }
+        ForkliftCommands::Build { .. } | ForkliftCommands::Run { .. } => Err(CliError::message(
+            "build/run exigem package.kind = bin; use check para biblioteca",
+        )),
+        ForkliftCommands::Init { .. } => unreachable!(),
+    }
+}
+
+fn init_package(directory: &Path, library: bool) -> Result<(), CliError> {
+    fs::create_dir_all(directory).map_err(|e| CliError::message(e.to_string()))?;
+    let manifest = directory.join("truxt.toml");
+    let source = directory.join("main.truxt");
+    if manifest.exists() || source.exists() {
+        return Err(CliError::message(
+            "truxt.toml ou main.truxt já existe; nenhum arquivo foi sobrescrito",
+        ));
+    }
+    let absolute =
+        truxt_project::source_path(directory).map_err(|e| CliError::message(e.to_string()))?;
+    let name = absolute
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("truxt-package");
+    let name = initial_package_name(name);
+    let name = serde_json::to_string(&name).map_err(|e| CliError::message(e.to_string()))?;
+    let text=format!("[package]\nname = {name}\nversion = \"0.1.0\"\nkind = \"{}\"\nentry = \"main.truxt\"\n\n[dependencies]\n",if library {"lib"}else{"bin"});
+    publish_package_files(
+        directory,
+        text.as_bytes(),
+        if library {
+            b"export function greeting(): string { return \"Hello, Truxt!\"; }\n"
+        } else {
+            b"console.log(\"Hello, Truxt!\");\n"
+        },
+    )
+    .map_err(|e| CliError::message(e.to_string()))?;
+    println!("Pacote criado: {}", manifest.display());
+    Ok(())
+}
+
+fn initial_package_name(directory_name: &str) -> String {
+    let filtered: String = directory_name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut name = filtered
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if name.is_empty() {
+        return "truxt-package".to_owned();
+    }
+    if !name.as_bytes()[0].is_ascii_alphabetic() {
+        name = format!("truxt-{name}");
+    }
+    name
+}
+
+fn publish_package_files(directory: &Path, manifest: &[u8], source: &[u8]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_INIT: AtomicU64 = AtomicU64::new(0);
+    let path = directory.join(format!(
+        ".forklift-init-{}-{}",
+        std::process::id(),
+        NEXT_INIT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir(&path)?;
+    let mut stage = PackageStage {
+        path,
+        published: Vec::new(),
+    };
+    fs::write(stage.path.join("truxt.toml"), manifest)?;
+    fs::write(stage.path.join("main.truxt"), source)?;
+    for name in ["truxt.toml", "main.truxt"] {
+        let destination = directory.join(name);
+        // Same-filesystem hard links publish complete bytes without replacing an
+        // existing target. A second publication failure rolls the first back.
+        // PT-BR: Hard links publicam bytes completos sem sobrescrever; falhar a
+        // segunda publicação desfaz a primeira, preservando arquivos anteriores.
+        fs::hard_link(stage.path.join(name), &destination)?;
+        stage.published.push(destination);
+    }
+    stage.published.clear();
+    Ok(())
+}
+struct PackageStage {
+    path: PathBuf,
+    published: Vec<PathBuf>,
+}
+impl Drop for PackageStage {
+    fn drop(&mut self) {
+        for path in &self.published {
+            let _ = fs::remove_file(path);
+        }
+        for name in ["truxt.toml", "main.truxt"] {
+            let _ = fs::remove_file(self.path.join(name));
+        }
+        let _ = fs::remove_dir(&self.path);
+    }
 }
 
 struct GeneratedProject {
@@ -132,49 +356,33 @@ pub fn execute() -> u8 {
 
 fn dispatch(command: Commands) -> Result<u8, CliError> {
     match command {
-        Commands::Build { input } => {
-            let project = generate_project(&input)?;
-            println!("Compilando {}...", project.source_path.display());
-            let build = cargo_build(&project)?;
-            if build.exit_code != 0 {
-                return Ok(build.exit_code);
-            }
-            let binary = build
-                .executable
-                .ok_or_else(|| CliError::message("Cargo não informou o binário gerado"))?;
-            let output = output_binary_path(&project.source_path, &binary);
-            fs::copy(&binary, &output).map_err(|error| {
-                CliError::message(format!(
-                    "não foi possível copiar `{}` para `{}`: {error}",
-                    binary.display(),
-                    output.display()
-                ))
-            })?;
-            println!("Binário gerado: {}", output.display());
-            Ok(0)
-        }
-        Commands::Run { input, args } => {
-            let project = generate_project(&input)?;
-            println!("Compilando {}...", project.source_path.display());
-            let build = cargo_build(&project)?;
-            if build.exit_code != 0 {
-                return Ok(build.exit_code);
-            }
-            let executable = build
-                .executable
-                .ok_or_else(|| CliError::message("Cargo não informou o binário gerado"))?;
-            let status = ProcessCommand::new(executable)
-                .args(args)
-                .status()
-                .map_err(|error| {
-                    CliError::message(format!("não foi possível executar o binário: {error}"))
-                })?;
-            Ok(exit_code(status))
-        }
+        Commands::Build { input } => build_generated(generate_project(&input)?),
+        Commands::Run { input, args } => run_generated(generate_project(&input)?, args),
         Commands::Check { input } => {
             let project = generate_project(&input)?;
             cargo_check(&project)
         }
+        Commands::Lint {
+            input,
+            deny_warnings,
+        } => {
+            let mut analysis = ProjectSession::new().analyze(&input);
+            if let Some(hir) = &analysis.hir {
+                analysis.diagnostics.extend(truxt_project::lint::lint(hir));
+            }
+            for diagnostic in &analysis.diagnostics {
+                report_diagnostic(&analysis.sources, diagnostic);
+            }
+            Ok(u8::from(
+                analysis.has_errors()
+                    || (deny_warnings
+                        && analysis
+                            .diagnostics
+                            .iter()
+                            .any(|d| d.severity == Severity::Warning)),
+            ))
+        }
+        Commands::Lsp => lsp::serve().map_err(|error| CliError::message(error.to_string())),
         Commands::Init { directory } => {
             init_project(&directory)?;
             Ok(0)
@@ -182,39 +390,53 @@ fn dispatch(command: Commands) -> Result<u8, CliError> {
     }
 }
 
-fn generate_project(input: &Path) -> Result<GeneratedProject, CliError> {
-    let source_path = fs::canonicalize(input).map_err(|error| {
+fn build_generated(project: GeneratedProject) -> Result<u8, CliError> {
+    println!("Compilando {}...", project.source_path.display());
+    let build = cargo_build(&project)?;
+    if build.exit_code != 0 {
+        return Ok(build.exit_code);
+    }
+    let binary = build
+        .executable
+        .ok_or_else(|| CliError::message("Cargo não informou o binário gerado"))?;
+    let output = output_binary_path(&project.source_path, &binary);
+    fs::copy(&binary, &output).map_err(|error| {
         CliError::message(format!(
-            "não foi possível abrir `{}`: {error}",
-            input.display()
+            "não foi possível copiar `{}` para `{}`: {error}",
+            binary.display(),
+            output.display()
         ))
     })?;
-    if !source_path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("truxt"))
-    {
-        return Err(CliError::message(
-            "a extensão do arquivo fonte deve ser `.truxt`",
-        ));
+    println!("Binário gerado: {}", output.display());
+    Ok(0)
+}
+fn run_generated(project: GeneratedProject, args: Vec<OsString>) -> Result<u8, CliError> {
+    println!("Compilando {}...", project.source_path.display());
+    let build = cargo_build(&project)?;
+    if build.exit_code != 0 {
+        return Ok(build.exit_code);
     }
-    let loaded = modules::load_program(&source_path)?;
-    let hir = match analyze(loaded.ast) {
-        Ok(hir) => hir,
-        Err(errors) => {
-            for error in errors {
-                report_diagnostic(
-                    &loaded.sources,
-                    error.span,
-                    error.secondary_span,
-                    &error.to_string(),
-                );
-            }
-            return Err(CliError::DiagnosticsReported);
-        }
-    };
+    let executable = build
+        .executable
+        .ok_or_else(|| CliError::message("Cargo não informou o binário gerado"))?;
+    let status = ProcessCommand::new(executable)
+        .args(args)
+        .status()
+        .map_err(|error| {
+            CliError::message(format!("não foi possível executar o binário: {error}"))
+        })?;
+    Ok(exit_code(status))
+}
 
-    write_generated_project(&source_path, &hir)
+fn generate_project(input: &Path) -> Result<GeneratedProject, CliError> {
+    generate_analysis(ProjectSession::new().analyze(input))
+}
+fn generate_analysis(analysis: truxt_project::Analysis) -> Result<GeneratedProject, CliError> {
+    for diagnostic in &analysis.diagnostics {
+        report_diagnostic(&analysis.sources, diagnostic);
+    }
+    let hir = analysis.hir.as_ref().ok_or(CliError::DiagnosticsReported)?;
+    write_generated_project(&analysis.entry, hir)
 }
 
 fn write_generated_project(
@@ -415,4 +637,25 @@ fn exit_code(status: std::process::ExitStatus) -> u8 {
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .unwrap_or(1)
+}
+
+#[cfg(test)]
+mod package_init_tests {
+    use super::*;
+    #[test]
+    fn second_publication_failure_rolls_back_first_and_preserves_existing_source() {
+        let directory =
+            std::env::temp_dir().join(format!("forklift-init-rollback-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("main.truxt"), b"user source").unwrap();
+        assert!(publish_package_files(&directory, b"new manifest", b"new source").is_err());
+        assert!(!directory.join("truxt.toml").exists());
+        assert_eq!(
+            fs::read(directory.join("main.truxt")).unwrap(),
+            b"user source"
+        );
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_file(directory.join("main.truxt")).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
 }

@@ -1,0 +1,4 @@
+.vscode/**
+package-lock.json
+README.pt-BR.md
+node_modules/**/test/**

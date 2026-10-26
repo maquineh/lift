@@ -16,6 +16,8 @@ use std::{error::Error, fmt};
 use truxt_ast::{BinaryOperator, BindingKind, Span, UnaryOperator};
 
 pub use analyzer::analyze;
+pub use packages::analyze_project;
+mod packages;
 
 /// Tipo Truxt resolvido. Referências Rust são representadas separadamente por
 /// [`ParameterPassMode`] e [`ArgPassMode`], nunca como tipos de expressão.
@@ -378,6 +380,9 @@ pub struct CallTempId(pub u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SemaErrorKind {
+    InvalidPackage,
+    PrivatePackageMember,
+    InvalidExport,
     InvalidImport,
     DuplicateDeclaration,
     DuplicateField,

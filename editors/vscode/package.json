@@ -1,0 +1,30 @@
+{
+  "name": "truxt-language",
+  "displayName": "Truxt",
+  "icon": "icon.jpg",
+  "description": "Truxt syntax, project diagnostics, and build/check/lint/run tasks",
+  "version": "0.1.0",
+  "publisher": "truxt-local",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/maquineh/truxt.git", "directory": "editors/vscode" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:truxt", "onTaskType:truxt"],
+  "capabilities": { "untrustedWorkspaces": { "supported": false } },
+  "contributes": {
+    "languages": [{ "id": "truxt", "aliases": ["Truxt", "truxt"], "extensions": [".truxt"], "configuration": "./language-configuration.json" }],
+    "grammars": [{ "language": "truxt", "scopeName": "source.truxt", "path": "./syntaxes/truxt.tmLanguage.json" }],
+    "commands": [{ "command": "truxt.restartServer", "title": "Truxt: Restart Language Server" }],
+    "configuration": {
+      "title": "Truxt",
+      "properties": {
+        "truxt.serverPath": { "type": "string", "default": "truxt", "scope": "window", "description": "Truxt executable on PATH or absolute path (without arguments)." },
+        "truxt.entry": { "type": "string", "default": "", "scope": "window", "description": "Project entry relative to the first workspace folder, or absolute. Empty analyzes each open file as an entry. Restart applies changes." }
+      }
+    },
+    "taskDefinitions": [{ "type": "truxt", "required": ["command", "file"], "properties": { "command": { "type": "string", "enum": ["check", "build", "lint", "run"] }, "file": { "type": "string", "description": "Source entry, relative to the task workspace folder or absolute." } } }]
+  },
+  "scripts": { "check": "node --check extension.js" },
+  "dependencies": { "vscode-languageclient": "9.0.1" }
+}

@@ -1,6 +1,8 @@
 /target/
 **/.truxt_cache/
 /dist/
+/editors/vscode/node_modules/
+/editors/vscode/*.vsix
 /examples/*.exe
 /examples/fibonacci
 /examples/ownership
@@ -12,3 +14,5 @@
 /examples/option
 /examples/modules/main
 /examples/modules/main.exe
+/examples/packages/app/main
+/examples/packages/app/main.exe

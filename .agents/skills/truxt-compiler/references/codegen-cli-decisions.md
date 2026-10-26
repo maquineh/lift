@@ -30,6 +30,11 @@ Este documento registra codegen/CLI e empacotamento. HIR validado continua sendo
 
 ## Fora do escopo
 
+O incremento posterior de tooling move loader/SourceMap para `truxt_project`,
+adiciona `truxt lint`, `truxt lsp` e extensão VS Code inicial. Build/check/run
+mantêm o contrato de emissão/Cargo acima. Veja `tooling-decisions.md` e
+`docs/project-analysis-and-lsp.md` / `docs/project-analysis-and-lsp.pt-BR.md`.
+
 - Unions, try/catch, callbacks/escape de closures, FFI unsafe, generics gerais e structs FFI continuam fora. Métodos nominais, closures locais snapshot e templates primitivos seguem methods-closures-templates-decisions.md. Option/??, Result especial, console.log, imports seguros e Ariadne têm contratos registrados. Option fica totalmente fora do FFI, inclusive retornos.
 - O codegen consome HIR produzido por analyze; wrappers de import gerados deixam o rustc verificar caminho e assinatura Rust. Os testes de integração da CLI validam `check`, `build` e `run` com `examples/fibonacci.truxt`, `examples/ownership.truxt` e `examples/interop.truxt`; o E2E interop também confere stdout. Isso cobre os caminhos e recursos usados pelos exemplos, sem provar todas as formas possíveis de HIR ou imports.
 - Imports explícitos `import module "relative.truxt";` carregam múltiplos arquivos em uma tabela global, sem manifesto/namespaces. Somente a entrada aceita statements de topo. O grafo é relido em cada comando; não há chave completa de cache por conteúdo. Veja `modules-decisions.md`.

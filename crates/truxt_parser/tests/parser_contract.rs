@@ -14,6 +14,35 @@ fn parse_source(source: &str) -> Result<truxt_ast::ProgramAst, Vec<truxt_parser:
 }
 
 #[test]
+fn namespace_imports_and_export_functions_preserve_source_spans_and_contextual_identifiers() {
+    let source="import * as math from \"math\"; export function add(a:int,b:int):int {return a+b;} const export = 2; const as = 3;";
+    let tokens = truxt_lexer::tokenize_with_source(source, SourceId(9)).unwrap();
+    let ast = truxt_parser::parse_with_source(&tokens, SourceId(9)).unwrap();
+    let Declaration::PackageImport(import) = &ast.declarations[0] else {
+        panic!()
+    };
+    assert_eq!(import.alias.name, "math");
+    assert_eq!(import.dependency, "math");
+    assert_eq!(import.span.source, SourceId(9));
+    assert_eq!(
+        &source[import.dependency_span.start..import.dependency_span.end],
+        "\"math\""
+    );
+    assert!(matches!(
+        ast.declarations[1],
+        Declaration::ExportFunction(_)
+    ));
+    for rejected in [
+        "function f():void {import * as math from \"math\";}",
+        "export interface Public {value:int}",
+        "export const x = 1;",
+        "import {add} from \"math\";",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
 fn optional_array_suffixes_and_nullish_associativity_are_explicit() {
     let ast = parse_source(
         "function f(elements: int?[], array: int[]?): void {} const value = a ?? b ?? c;",

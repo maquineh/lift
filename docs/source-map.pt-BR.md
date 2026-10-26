@@ -11,7 +11,7 @@ O pipeline é `.truxt` → tokens → AST não tipada → HIR tipado validado �
 | `Cargo.toml` | Membros do workspace, versão/edition compartilhadas e dependências entre crates. |
 | `Cargo.lock` | Grafo fixado de dependências do compilador; instalação e empacotamento usam `--locked`. |
 | `.gitignore` | Exclui artefatos, projetos gerados em qualquer profundidade, binários dos exemplos e ZIPs de distribuição. |
-| `crates/*/Cargo.toml` | Dependências de cada crate; `truxt_cli` também declara o executável `truxt`. |
+| `crates/*/Cargo.toml` | Dependências de cada crate; `truxt_cli` declara executáveis `truxt` e `forklift`. |
 | `crates/truxt_ast/src/lib.rs` | Declarações, statements, expressões, imports e tipos não tipados, incluindo `Result<T, E>` especial. Não contém parser ou semântica. |
 | `crates/truxt_ast/src/span.rs` | SourceId e spans de bytes UTF-8; construtores legados com fonte zero e joins no mesmo arquivo. |
 | `crates/truxt_lexer/src/lib.rs` | Tokens Logos, erros léxicos, offsets, escapes brutos de strings e testes do lexer. |
@@ -25,8 +25,13 @@ O pipeline é `.truxt` → tokens → AST não tipada → HIR tipado validado �
 | `crates/truxt_codegen/src/lib.rs` | Emite Rust e manifestos Cargo com clones, temporários, wrappers FFI seguros e inspeção de Result. |
 | `crates/truxt_cli/src/lib.rs` | Comandos, diagnósticos, extração do core embutido, projetos gerados, Cargo, localização de artefatos e execução. |
 | `crates/truxt_cli/src/diagnostics.rs` | Relatórios Ariadne 0.6 com spans em bytes, labels relacionados, cores de terminal e testes do renderer. |
-| `crates/truxt_cli/src/sources.rs` | Posse de caminhos/textos canônicos e IDs únicos por compilação. |
-| `crates/truxt_cli/src/modules.rs` | Imports relativos, deduplicação/ciclos, statements exclusivos da entrada e achatamento da AST. |
+| `crates/truxt_project/src/sources.rs` | Fontes/SourceIds e posições UTF-16 com LF/CRLF/CR. |
+| `crates/truxt_project/src/modules.rs` | Carga legada de módulos e seleção da análise manifestada. |
+| `crates/truxt_project/src/lib.rs` | Sessões reutilizáveis, overlays estáveis e resultados SourceMap/HIR/diagnósticos. |
+| `crates/truxt_project/src/forklift.rs` | Manifestos locais, identidade canônica de pacotes, dependências, fronteiras e snapshots. |
+| `crates/truxt_project/src/lint.rs`, `diagnostics.rs` | Regras consultivas HIR e códigos sema explícitos estáveis. |
+| `crates/truxt_sema/src/packages.rs` | Análise contextual sem I/O, exports, HIR qualificado e BindingIds globais. |
+| `crates/truxt_cli/src/lsp.rs`, `forklift.rs` | Servidor JSON-RPC de diagnósticos e entrada CLI Forklift local. |
 | `crates/truxt_cli/src/main.rs` | Propaga o resultado da CLI como código de saída do processo. |
 
 AST e HIR mantêm spans da fonte. `analyze` não retorna HIR parcial após erro. O codegen consome decisões semânticas sem inferir ownership novamente. A lista de fontes embutidas do core é explícita na CLI; novos módulos do core também precisam entrar nela.
@@ -80,4 +85,4 @@ Testes unitários ficam junto das implementações de spans, lexer e stdlib. Exe
 
 Os registros internos ficam em `.agents/skills/truxt-compiler/`: `SKILL.md` define o fluxo de contribuição; `references/architecture.md` é o blueprint alvo; as decisões de fases 1/2/3 descrevem sintaxe e semântica implementadas; `codegen-cli-decisions.md` registra lowering/Cargo; `phase5-decisions.md` registra imports seguros limitados e console. O contrato atual de Result/I/O está em `docs/result-and-io.pt-BR.md` e sua versão inglesa. Um item no roadmap não significa que esteja implementado.
 
-Diagnósticos/reuso estão em `docs/diagnostics-and-build.pt-BR.md`. Imports multi-arquivo e identidade de fonte estão em `docs/modules.pt-BR.md`, ambos com versões inglesas. Manifesto, namespaces e cache por chave de dependências continuam futuros.
+Diagnósticos/reuso estão em `docs/diagnostics-and-build.pt-BR.md`; módulos legados em `docs/modules.pt-BR.md`; sessão/lint/LSP em `docs/project-analysis-and-lsp.pt-BR.md`; manifestos/namespaces locais em `docs/forklift.pt-BR.md`. Todos têm versão inglesa. Testes de contrato/API e `examples/packages/app` cobrem o incremento de pacotes locais. Cache por chave de dependências continua futuro.

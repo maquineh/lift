@@ -4,7 +4,7 @@ Rust/Cargo **1.94.1+** (MSRV: `1.94.1`).
 
 Truxt is a small, statically typed language that compiles a `.truxt` entry file and its explicit file modules to Rust, then uses Cargo to check, build, or run it.
 
-> **Current scope:** typed programs with explicit relative modules, a bundled standard library, safe Rust imports, console output, and Result-based UTF-8 input/files. The installed executable can be moved independently of this checkout. Rust, Cargo, and a host linker are still required to compile programs.
+> **Current scope:** typed programs with relative modules, local Forklift packages with explicit function exports, a bundled standard library, safe Rust imports, console output, and Result-based UTF-8 input/files. The installed executables can be moved independently of this checkout. Rust, Cargo, and a host linker are still required to compile programs.
 
 Truxt aims to feel familiar to TypeScript users within a documented subset; it is not a full TypeScript implementation. New language features must define their Truxt semantics and lower to valid Rust while accounting for Rust's ownership, borrowing, and safety rules.
 
@@ -25,6 +25,17 @@ cargo build --release -p truxt_cli
 ```
 
 The executable is written to `target/release/truxt` (or `truxt.exe` on Windows). Its standard-library sources are embedded at build time, so the executable does not need the original checkout afterward.
+
+The same build also produces `forklift`, the local package CLI. Start a manifested
+project with `forklift init my-app`, then use its resolve/check/build/run commands.
+See [Forklift local packages](docs/forklift.md) for `truxt.toml`,
+`import * as math from "math"`, `export function`, and the distinction from Rust
+crate dependencies. Forklift currently resolves only local paths.
+
+Run `truxt lint <entry.truxt>` for frontend warnings (`--deny-warnings` for CI).
+`truxt lsp` and the local [VS Code extension](editors/vscode/README.md) diagnose
+unsaved files. See [Project API and tooling](docs/project-analysis-and-lsp.md) for API contracts
+and the initial editor features and limits.
 
 ## Install or create a portable package
 
@@ -91,7 +102,7 @@ console.log(double(21));
 function double(value: int): int { return value * 2; }
 ```
 
-Paths are relative to the importing file and must include `.truxt`. Imports are recursive; canonical paths are included once, so repeated imports and cycles are allowed. Only the entry file may contain executable top-level statements. Imported modules may declare functions, interfaces, Rust FFI imports, and further module imports. Declarations share a global namespace; duplicate names are errors with labels at both files. There are no module aliases, namespaces, exports, or project manifest yet. Rust `import function ... from ...` syntax is unchanged.
+Paths are relative to the importing file and must include `.truxt`. Imports are recursive; canonical paths are included once, so repeated imports and cycles are allowed. Only the entry file may contain executable top-level statements. Imported modules may declare functions, interfaces, Rust FFI imports, and further module imports. File modules remain flat, sharing a namespace within their package; duplicate names are errors with labels at both files. Without a manifest this is the legacy global namespace. Manifested projects additionally support package aliases and exported functions through [Forklift](docs/forklift.md). Rust `import function ... from ...` syntax is unchanged.
 
 Run `truxt run examples/modules/main.truxt` for relative/transitive imports, FFI, shared types, and cycles including the entry file. See [the module contract](docs/modules.md) for source identity and exact limits.
 
@@ -172,11 +183,13 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 
 ## Current limitations
 
-- One entry file per CLI invocation, with explicit relative file imports; no project manifest, module namespaces, or aliases.
+- One executable entry, with legacy flat file modules or local `truxt.toml` packages. Forklift supports path dependencies and exported primitive/container function signatures; no Truxt registry, remote dependencies, public custom types or reexports yet.
 - No complete content-keyed cache. Identical generated files are preserved, and Cargo reuses its own incremental artifacts; analysis/code generation still run each time.
 - Ownership analysis remains conservative and rejects some complex aliasing patterns. A private CFG/liveness pass removes only proven last-use clones of direct owned locals; borrowed values, projections, repeated statement uses, and `ByClone` call arguments retain their copies. See [the ownership optimization contract](docs/liveness.md).
 - Nominal methods/`impl`, local snapshot arrow closures, and primitive template interpolation are supported; see [their contracts and limits](docs/methods-closures-templates.md). Unions and `try/catch` remain unimplemented. Option remains outside the FFI, and optional fields cannot be omitted.
 - Result support uses `is_ok` and cloned unwrap operations; constructors, matching, and automatic error propagation are not implemented.
+
+Database and HTTP work remains design-only. See the [database compatibility plan](docs/database-compatibility.md) for the PostgreSQL/SQLite targets and the [callback/HTTP contract](docs/callbacks-and-web-contract.md) for the planned Axum adapter. Neither document claims the feature is implemented.
 
 ## Examples and tests
 
@@ -187,6 +200,7 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 - `examples/io.truxt` — arguments, stdin, and UTF-8 file round trips.
 - `examples/registry.truxt` — `num-integer` 0.1.46 imported with an exact version.
 - `examples/modules/main.truxt` — recursive file modules, global declarations, repeated imports, and cycles.
+- `examples/packages/app` — Forklift manifest, transitive local libraries, qualified calls, private nominal types, closures, mutation and Rust FFI.
 - `examples/methods-closures-templates.truxt` - receiver mutation, snapshot captures, nested templates, and evaluation order.
 - `examples/liveness.truxt` — last-use copies, joins, returns, loops, and reassignment validated through Rust compilation.
 - `examples/option.truxt` — optional values, chained lazy fallbacks, and exactly-once effects.

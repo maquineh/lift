@@ -4,10 +4,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "CLI do compilador Truxt"
+default-run = "truxt"
 
 [[bin]]
 name = "truxt"
 path = "src/main.rs"
+
+[[bin]]
+name = "forklift"
+path = "src/forklift.rs"
 
 [dependencies]
 ariadne.workspace = true
@@ -18,3 +23,4 @@ truxt_codegen.workspace = true
 truxt_lexer.workspace = true
 truxt_parser.workspace = true
 truxt_sema.workspace = true
+truxt_project.workspace = true

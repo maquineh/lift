@@ -1,10 +1,15 @@
 # Truxt
 
+`truxt lint <entrada.truxt>` emite avisos sem gerar Rust (`--deny-warnings` no CI).
+`truxt lsp` e a [extensão local VS Code](editors/vscode/README.pt-BR.md) diagnosticam
+arquivos não salvos. Consulte os contratos e limites da
+[API de projeto e tooling](docs/project-analysis-and-lsp.pt-BR.md).
+
 Rust/Cargo **1.94.1+** (MSRV: `1.94.1`).
 
 Truxt é uma linguagem pequena e estaticamente tipada que compila uma entrada `.truxt` e seus módulos explícitos para Rust, usando Cargo para verificar, compilar ou executar.
 
-> **Escopo atual:** programas tipados com módulos relativos explícitos, biblioteca padrão embutida, imports Rust seguros, console e I/O UTF-8 baseado em Result. O executável pode ser movido independentemente do checkout. Rust, Cargo e um linker do host continuam necessários para compilar programas.
+> **Escopo atual:** programas tipados com módulos relativos, pacotes locais Forklift com exports explícitos de funções, biblioteca padrão embutida, imports Rust seguros, console e I/O UTF-8 baseado em Result. Os executáveis podem ser movidos independentemente do checkout. Rust, Cargo e um linker do host continuam necessários para compilar programas.
 
 Truxt busca ser familiar para quem usa TypeScript dentro de um subconjunto documentado; não é uma implementação completa de TypeScript. Cada recurso novo deve definir a semântica Truxt e gerar Rust válido, considerando ownership, borrowing e segurança do Rust.
 
@@ -25,6 +30,12 @@ cargo build --release -p truxt_cli
 ```
 
 O executável será gravado em `target/release/truxt` (ou `truxt.exe` no Windows). As fontes da stdlib são incorporadas durante sua compilação; o executável não precisa mais do checkout original.
+
+O mesmo build produz `forklift`, CLI de pacotes locais. Inicie um projeto
+manifestado com `forklift init my-app` e use seus comandos resolve/check/build/run.
+Veja [pacotes locais Forklift](docs/forklift.pt-BR.md) para `truxt.toml`,
+`import * as math from "math"`, `export function` e a distinção de crates Rust.
+Forklift resolve apenas paths locais nesta etapa.
 
 ## Instalação ou pacote portátil
 
@@ -91,7 +102,7 @@ console.log(double(21));
 function double(value: int): int { return value * 2; }
 ```
 
-Caminhos são relativos ao arquivo importador e exigem `.truxt`. Imports são recursivos; cada caminho canônico entra uma vez, permitindo repetições e ciclos. Somente a entrada pode conter statements executáveis de topo. Módulos importados podem declarar funções, interfaces, imports Rust FFI e outros módulos. Declarações compartilham namespace global; duplicatas geram erro com labels nos dois arquivos. Ainda não há aliases, namespaces de módulo, exports ou manifesto de projeto. A sintaxe Rust `import function ... from ...` não mudou.
+Caminhos são relativos ao arquivo importador e exigem `.truxt`. Imports são recursivos; cada caminho canônico entra uma vez, permitindo repetições e ciclos. Somente a entrada pode conter statements executáveis de topo. Módulos importados podem declarar funções, interfaces, imports Rust FFI e outros módulos. Módulos de arquivo continuam flat e compartilham namespace dentro do pacote; duplicatas geram erro com labels nos dois arquivos. Sem manifesto permanece o namespace global legado. Projetos manifestados também suportam aliases de pacotes e funções exportadas pelo [Forklift](docs/forklift.pt-BR.md). A sintaxe Rust `import function ... from ...` não mudou.
 
 Execute `truxt run examples/modules/main.truxt` para imports relativos/transitivos, FFI, tipos compartilhados e ciclos incluindo a entrada. Consulte o [contrato de módulos](docs/modules.pt-BR.md) para identidade de fonte e limites exatos.
 
@@ -172,11 +183,13 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 
 ## Limitações atuais
 
-- Uma entrada por execução da CLI, com imports relativos explícitos; sem manifesto, namespaces de módulo ou aliases.
+- Uma entrada executável, com módulos flat legados ou pacotes locais `truxt.toml`. Forklift suporta dependências path e funções públicas de primitivos/containers; sem registry Truxt, dependências remotas, tipos customizados públicos ou reexports nesta etapa.
 - Não há cache completo por chave de conteúdo. Arquivos gerados idênticos são preservados e Cargo reutiliza seus artefatos; análise/codegen continuam executando a cada chamada.
 - A análise de ownership continua conservadora e rejeita alguns padrões complexos de aliasing. Uma passagem privada CFG/liveness remove somente clones comprovadamente de último uso de locais owned diretos; valores emprestados, projeções, usos repetidos no statement e argumentos `ByClone` mantêm cópias. Consulte o [contrato da otimização](docs/liveness.pt-BR.md).
 - Métodos nominais/`impl`, arrow closures locais com snapshot e interpolação de primitivos estão implementados; veja [contratos e limites](docs/methods-closures-templates.pt-BR.md). Unions e `try/catch` continuam pendentes. Option fica fora do FFI e campos opcionais não podem ser omitidos.
 - Result usa `is_ok` e unwrap com cópia; construtores, matching e propagação automática de erros não foram implementados.
+
+Banco de dados e HTTP ainda estão apenas em fase de projeto. Consulte o [plano de compatibilidade de banco](docs/database-compatibility.pt-BR.md) para os alvos PostgreSQL/SQLite e o [contrato de callbacks/HTTP](docs/callbacks-and-web-contract.pt-BR.md) para o adaptador Axum planejado. Esses documentos não afirmam que os recursos já foram implementados.
 
 ## Exemplos e testes
 

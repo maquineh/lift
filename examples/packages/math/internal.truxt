@@ -1,0 +1,3 @@
+interface Item { value: int }
+impl Item { function get(): int { return this.value; } }
+function same(): int { return 1; }

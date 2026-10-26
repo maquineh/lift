@@ -26,6 +26,7 @@ truxt/
 │   ├── truxt_parser/    # tokens -> AST não tipada
 │   ├── truxt_sema/      # símbolos, tipos, análise de ownership -> HIR
 │   ├── truxt_codegen/   # HIR -> Rust e manifesto Cargo
+│   ├── truxt_project/   # sessão, grafo, overlays, diagnósticos e lint HIR
 │   └── truxt_cli/       # build, run, check, init
 └── stdlib/
     └── truxt_core/      # Console, helpers de array e operações de string
@@ -47,7 +48,8 @@ O blueprint também sugere criar AST e lexer com tokens/nós para objetos, funç
 Estado do incremento posterior à v0.1: a CLI já usa Ariadne 0.6.0 com spans em
 bytes e preserva arquivos gerados de conteúdo idêntico. Isso não é cache completo
 por chave de conteúdo. Módulos relativos explícitos, SourceId e tabela global
-já estão implementados, sem manifesto ou namespaces. O contrato
+já estão implementados no caminho legado flat. Manifesto/namespaces locais
+adicionais seguem `forklift-decisions.md`. O contrato legado
 está em `modules-decisions.md`. Os demais contratos estão em `codegen-cli-decisions.md` e nos guias
 `docs/diagnostics-and-build.md` / `.pt-BR.md` da raiz.
 
@@ -57,6 +59,11 @@ closures locais com captura snapshot e templates primitivos contextuais. Consult
 ao TypeScript e limites de ownership; callbacks/escape de closure seguem fora.
 
 ## Pipelines
+
+O incremento de tooling extrai a carga de projeto e SourceMap da CLI para
+`truxt_project`, preservando APIs/semântica anteriores. CLI, lint e LSP inicial
+consomem a mesma sessão; veja `tooling-decisions.md` e os guias bilíngues
+`docs/project-analysis-and-lsp.md` / `docs/project-analysis-and-lsp.pt-BR.md`.
 
 ### A. Fonte para AST
 

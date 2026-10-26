@@ -14,6 +14,73 @@ use std::{
 static NEXT_TEMP_DIR: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
+fn lint_warns_without_generating_and_deny_warnings_controls_the_exit_status() {
+    let temp = TempDir::new("lint");
+    let source = temp.path().join("lint.truxt");
+    fs::write(&source, "const unused = 1; if true { 42; }").unwrap();
+    let warned = cli().arg("lint").arg(&source).output().unwrap();
+    assert_success(&warned, "lint warnings");
+    let stderr = String::from_utf8_lossy(&warned.stderr);
+    for rule in ["unused-binding", "literal-condition", "discarded-value"] {
+        assert!(stderr.contains(rule), "{stderr}");
+    }
+    assert!(stderr.contains("Warning:"));
+    let denied = cli()
+        .arg("lint")
+        .arg("--deny-warnings")
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(denied.status.code(), Some(1));
+    assert!(!temp.path().join(".truxt_cache").exists());
+    fs::write(&source, "const bad: int = true;").unwrap();
+    let failed = cli().arg("lint").arg(&source).output().unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("Error:"));
+    assert!(!String::from_utf8_lossy(&failed.stderr).contains("Warning:"));
+}
+
+#[test]
+fn lsp_executable_emits_framed_protocol_without_cli_chatter() {
+    let messages = [
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"shutdown"}),
+        serde_json::json!({"jsonrpc":"2.0","method":"exit"}),
+    ];
+    let mut input = String::new();
+    for message in messages {
+        let body = message.to_string();
+        input.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+    }
+    let mut command = cli();
+    command.arg("lsp");
+    let result = run_with_input(command, &input);
+    assert_success(&result, "lsp handshake");
+    assert!(result.stderr.is_empty());
+    let mut bytes = result.stdout.as_slice();
+    let mut count = 0;
+    while !bytes.is_empty() {
+        let delimiter = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
+        let header = std::str::from_utf8(&bytes[..delimiter]).unwrap();
+        let length: usize = header
+            .strip_prefix("Content-Length: ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let body = &bytes[delimiter + 4..delimiter + 4 + length];
+        let value: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(value["jsonrpc"], "2.0");
+        assert!(value.get("result").is_some());
+        count += 1;
+        bytes = &bytes[delimiter + 4 + length..];
+    }
+    assert_eq!(count, 2);
+}
+
+#[test]
 fn methods_closures_and_templates_compile_and_run() {
     let temp = TempDir::new("methods-closures-templates");
     let source = temp.path().join("features.truxt");
@@ -53,6 +120,160 @@ impl Drop for TempDir {
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_truxt"))
+}
+
+fn forklift() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_forklift"))
+}
+
+fn write_package_example(directory: &Path) -> PathBuf {
+    for (path, text) in [
+        (
+            "app/truxt.toml",
+            include_str!("../../../examples/packages/app/truxt.toml"),
+        ),
+        (
+            "app/main.truxt",
+            include_str!("../../../examples/packages/app/main.truxt"),
+        ),
+        (
+            "math/truxt.toml",
+            include_str!("../../../examples/packages/math/truxt.toml"),
+        ),
+        (
+            "math/main.truxt",
+            include_str!("../../../examples/packages/math/main.truxt"),
+        ),
+        (
+            "math/internal.truxt",
+            include_str!("../../../examples/packages/math/internal.truxt"),
+        ),
+        (
+            "base/truxt.toml",
+            include_str!("../../../examples/packages/base/truxt.toml"),
+        ),
+        (
+            "base/main.truxt",
+            include_str!("../../../examples/packages/base/main.truxt"),
+        ),
+        (
+            "text/truxt.toml",
+            include_str!("../../../examples/packages/text/truxt.toml"),
+        ),
+        (
+            "text/main.truxt",
+            include_str!("../../../examples/packages/text/main.truxt"),
+        ),
+    ] {
+        let path = directory.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+    directory.join("app")
+}
+
+#[test]
+fn forklift_resolves_checks_builds_and_runs_local_packages_with_qualified_calls() {
+    let temp = TempDir::new("forklift");
+    let app = write_package_example(temp.path());
+    let resolved = forklift().arg("resolve").arg(&app).output().unwrap();
+    assert_success(&resolved, "forklift resolve");
+    let text = String::from_utf8_lossy(&resolved.stdout);
+    for name in ["demo", "math", "base", "text"] {
+        assert!(text.contains(name), "{text}");
+    }
+    assert!(!app.join(".truxt_cache").exists());
+    for command in ["check", "build", "run"] {
+        let output = forklift().arg(command).arg(&app).output().unwrap();
+        assert_success(&output, &format!("forklift {command}"));
+        if command == "run" {
+            assert!(String::from_utf8_lossy(&output.stdout)
+                .replace("\r\n", "\n")
+                .ends_with("4\n5\nTruxt!\nTruxt\n5\n"));
+        }
+    }
+    let direct = cli()
+        .arg("run")
+        .arg(app.join("main.truxt"))
+        .output()
+        .unwrap();
+    assert_success(&direct, "truxt manifested entry");
+    assert!(String::from_utf8_lossy(&direct.stdout)
+        .replace("\r\n", "\n")
+        .ends_with("4\n5\nTruxt!\nTruxt\n5\n"));
+    let binary = Command::new(app.join(binary_name("main")))
+        .output()
+        .unwrap();
+    assert_success(&binary, "package binary");
+    assert_eq!(
+        String::from_utf8_lossy(&binary.stdout).replace("\r\n", "\n"),
+        "4\n5\nTruxt!\nTruxt\n5\n"
+    );
+    let manifest = fs::read_to_string(app.join(".truxt_cache/main/Cargo.toml")).unwrap();
+    assert!(manifest.contains("truxt_core"));
+    assert!(!manifest.contains("../math"));
+    assert!(!app.join("forklift.lock").exists());
+}
+
+#[test]
+fn forklift_init_is_local_and_refuses_overwrites_and_requires_manifest_for_commands() {
+    let temp = TempDir::new("forklift-init");
+    let app = temp.path().join("app");
+    let created = forklift().arg("init").arg(&app).output().unwrap();
+    assert_success(&created, "forklift init");
+    assert!(app.join("truxt.toml").exists());
+    assert!(app.join("main.truxt").exists());
+    let before = fs::read(app.join("truxt.toml")).unwrap();
+    assert!(!forklift()
+        .arg("init")
+        .arg(&app)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert_eq!(fs::read(app.join("truxt.toml")).unwrap(), before);
+    let library = temp.path().join("library");
+    assert_success(
+        &forklift()
+            .arg("init")
+            .arg("--lib")
+            .arg(&library)
+            .output()
+            .unwrap(),
+        "forklift init --lib",
+    );
+    assert_success(
+        &forklift().arg("check").arg(&library).output().unwrap(),
+        "forklift check lib",
+    );
+    assert!(!forklift()
+        .arg("run")
+        .arg(&library)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let legacy = temp.path().join("legacy");
+    fs::create_dir(&legacy).unwrap();
+    fs::write(legacy.join("main.truxt"), "console.log(1);").unwrap();
+    assert!(!forklift()
+        .arg("resolve")
+        .arg(legacy)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let spaced = temp.path().join("my project ação");
+    assert_success(
+        &forklift().arg("init").arg(&spaced).output().unwrap(),
+        "forklift init spaced unicode directory",
+    );
+    let manifest = fs::read_to_string(spaced.join("truxt.toml")).unwrap();
+    assert!(manifest.contains("name = \"my-project-a-o\""), "{manifest}");
+    assert_success(
+        &forklift().arg("check").arg(&spaced).output().unwrap(),
+        "forklift check initialized unicode path",
+    );
 }
 
 fn assert_success(output: &Output, context: &str) {

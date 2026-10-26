@@ -8,9 +8,9 @@ use std::{
     ops::Range,
 };
 
-use crate::sources::SourceMap;
 use ariadne::{Color, Config, IndexType, Label, Report, ReportKind};
 use truxt_ast::{SourceId, Span};
+use truxt_project::{Diagnostic, Severity, SourceMap};
 
 // EN: Path text is presentation only; SourceId prevents lossy-path collisions.
 // PT-BR: Caminho é apresentação; SourceId impede colisões de textos com perda.
@@ -26,16 +26,30 @@ impl fmt::Display for SourceKey {
     }
 }
 
-pub(crate) fn report_diagnostic(
-    sources: &SourceMap,
-    primary: Span,
-    secondary: Option<Span>,
-    message: &str,
-) {
+pub(crate) fn report_diagnostic(sources: &SourceMap, diagnostic: &Diagnostic) {
+    let Some(primary) = diagnostic.span else {
+        eprintln!("truxt: {}: {}", diagnostic.code, diagnostic.message);
+        return;
+    };
     let stderr = io::stderr();
     let color = stderr.is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let mut stderr = stderr.lock();
-    if write_diagnostic(&mut stderr, sources, primary, secondary, message, color).is_err() {
+    let kind = match diagnostic.severity {
+        Severity::Error => ReportKind::Error,
+        Severity::Warning => ReportKind::Warning,
+    };
+    let message = format!("[{}] {}", diagnostic.code, diagnostic.message);
+    if write_report(
+        &mut stderr,
+        sources,
+        primary,
+        diagnostic.secondary_span,
+        &message,
+        color,
+        kind,
+    )
+    .is_err()
+    {
         let path = sources
             .get(primary.source)
             .map(|source| source.path.display().to_string())
@@ -44,6 +58,7 @@ pub(crate) fn report_diagnostic(
     }
 }
 
+#[cfg(test)]
 fn write_diagnostic(
     writer: impl Write,
     sources: &SourceMap,
@@ -51,6 +66,26 @@ fn write_diagnostic(
     secondary: Option<Span>,
     message: &str,
     color: bool,
+) -> io::Result<()> {
+    write_report(
+        writer,
+        sources,
+        primary,
+        secondary,
+        message,
+        color,
+        ReportKind::Error,
+    )
+}
+
+fn write_report(
+    writer: impl Write,
+    sources: &SourceMap,
+    primary: Span,
+    secondary: Option<Span>,
+    message: &str,
+    color: bool,
+    kind: ReportKind<'_>,
 ) -> io::Result<()> {
     let primary_source = sources
         .get(primary.source)
@@ -60,7 +95,7 @@ fn write_diagnostic(
         display: primary_source.path.display().to_string(),
     };
     let primary = source_range(&primary_source.text, primary);
-    let mut report = Report::build(ReportKind::Error, (key.clone(), primary.clone()))
+    let mut report = Report::build(kind, (key.clone(), primary.clone()))
         .with_config(
             Config::default()
                 .with_index_type(IndexType::Byte)

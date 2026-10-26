@@ -2,6 +2,10 @@
 
 [English](modules.md) · [Guia de uso](../README.pt-BR.md)
 
+Este documento descreve imports flat legados, preservados sem manifesto.
+O [incremento Forklift](forklift.pt-BR.md) acrescenta `truxt.toml`, namespaces
+de pacotes e funções exportadas; módulos continuam flat dentro de cada pacote.
+
 `import module "relative.truxt";` é declaração de topo, distinta dos imports Rust FFI. O ponto e vírgula é obrigatório. `module` é contextual nessa posição e continua disponível como identificador comum. Imports aninhados, aliases, namespaces, exports, busca de pacotes e manifesto ficam fora deste incremento.
 
 Cada caminho é relativo ao arquivo importador, independentemente do diretório de trabalho do chamador. Exige extensão `.truxt`, sem distinção de maiúsculas como na entrada da CLI. Caminhos absolutos/enraizados ou com prefixo de drive são rejeitados. `..` é permitido. O especificador usa o texto literal do token, sem interpolação ou decodificação de escapes de strings de runtime; use `/` para portabilidade.

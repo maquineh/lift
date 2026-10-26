@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Truxt", "scopeName": "source.truxt",
+  "patterns": [
+    { "name": "comment.line.double-slash.truxt", "match": "//.*$" },
+    { "name": "comment.block.truxt", "begin": "/\\*", "end": "\\*/" },
+    { "include": "#strings" },
+    { "name": "keyword.control.truxt", "match": "\\b(function|import|export|as|module|from|interface|impl|const|let|if|else|while|return)\\b" },
+    { "name": "storage.type.truxt", "match": "\\b(int|number|string|boolean|void|Result)\\b" },
+    { "name": "constant.language.truxt", "match": "\\b(true|false|null)\\b" },
+    { "name": "constant.numeric.truxt", "match": "\\b[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\b" },
+    { "name": "keyword.operator.truxt", "match": "=>|\\?\\?|==|!=|<=|>=|&&|\\|\\||[-+*/%=<>!?]" }
+  ],
+  "repository": {
+    "strings": { "patterns": [
+      { "name": "string.quoted.double.truxt", "begin": "\"", "end": "\"|$", "patterns": [{ "name": "constant.character.escape.truxt", "match": "\\\\." }] },
+      { "name": "string.quoted.single.truxt", "begin": "'", "end": "'|$", "patterns": [{ "name": "constant.character.escape.truxt", "match": "\\\\." }] },
+      { "name": "string.template.truxt", "begin": "`", "end": "`", "patterns": [
+        { "name": "constant.character.escape.truxt", "match": "\\\\." },
+        { "name": "meta.interpolation.truxt", "begin": "\\$\\{", "end": "\\}", "patterns": [{ "include": "#braced-expression" }, { "include": "$self" }] }
+      ] }
+    ] },
+    "braced-expression": { "begin": "\\{", "end": "\\}", "patterns": [{ "include": "#braced-expression" }, { "include": "$self" }] }
+  }
+}
