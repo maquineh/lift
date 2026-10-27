@@ -62,6 +62,10 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `stdlib/lift_db/src/resource.rs` | Owned connection/transaction protocol with commit, rollback and RAII disposal. |
 | `crates/lift_sema/src/resources.rs` | Conservative affine flow validation and HTTP registration checks. |
 | `scripts/verify_notes.py` | Portable process-level HTTP/SQLite acceptance, including restart and occupied port. |
+| `fuzz/Cargo.toml`, `fuzz/fuzz_targets/frontend.rs` | Standalone cargo-fuzz target for UTF-8 lexer/parser/semantic inputs, with a small tracked seed corpus. |
+| `crates/lift_sema/tests/frontend_robustness.rs` | Reproducible bounded malformed-source/truncation checks and UTF-8 token-span invariants. |
+| `editors/vscode/test/` | VS Code Extension Host integration using the real compiled Lift LSP executable. |
+| `.github/workflows/` | Stable/MSRV host matrix, formatting, periodic fuzzing, VS Code client integration, and release acceptance. |
 | `examples/notes-service/main.lift` | Lift DTOs, named handlers, static HTTP routes and SQLite resource operations. |
 | `examples/notes-service/db-smoke.lift` | Demonstrates the fixed SQLite operations imported through safe FFI. |
 | `examples/notes-service/README.md`, `README.pt-BR.md` | Bilingual instructions for building, configuring, and calling the HTTP/SQLite proof of concept. |
@@ -72,10 +76,12 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | --- | --- |
 | `crates/lift_parser/tests/parser_contract.rs` | Precedence, postfix syntax, recovery, required semicolons, imports, and Result type syntax. |
 | `crates/lift_sema/tests/semantic_contract.rs` | Types, recursion, borrow modes, alias rejection, imports, builtins, and Result validation. |
+| `crates/lift_sema/tests/frontend_robustness.rs` | Bounded deterministic source mutations/truncations, panic freedom, and token-span validity. |
 | `crates/lift_sema/tests/liveness_contract.rs` | Last-use eligibility and conservative counterexamples at joins, returns, loops, reassignment, calls, borrowed parameters, and projections. |
 | `crates/lift_sema/tests/option_contract.rs` | Optional/null typing, explicit lazy coalescing modes, required fields, inference limits, cycles, FFI rejection, and conservative ownership. |
 | `crates/lift_codegen/tests/codegen_contract.rs` | Generated Rust and Cargo contracts, safe wrappers, Result types, clones, and argument staging. |
-| `crates/lift_cli/tests/cli_end_to_end.rs` | Compile/run examples, relocation, Cargo paths, arguments/stdin/files, Result handling, Ariadne reports, and deterministic no-rewrite checks. The registry test is opt-in because it can use the network. |
+| `crates/lift_cli/tests/cli_end_to_end.rs` | Compile/run examples, relocation, Cargo paths, arguments/stdin/files, Result handling, Ariadne reports, LSP process sessions, cross-feature acceptance, ownership rejection, and deterministic no-rewrite checks. The registry test is opt-in because it can use the network. |
+| `docs/testing-and-release.md` | Feature-to-test matrix, CI gates, bounded fuzz commands, and release acceptance instructions. |
 | `examples/fibonacci.lift` | Recursive and iterative integer control flow. |
 | `examples/ownership.lift` | Mutation and owned values without explicit Rust borrow notation. |
 | `examples/interop.lift` | Safe local imports, borrowed arrays/strings, and `console.log`. |
@@ -89,7 +95,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `examples/modules/math/api.lift`, `math/helpers.lift` | Relative/transitive imports, cross-file calls, and module/root cycles. |
 | `scripts/package.ps1` | Build for the current Rust host and create a portable ZIP with executable, guides, and examples. |
 
-Unit tests remain alongside span, lexer, and standard-library implementations. Run `cargo test --workspace` and the explicit registry test from the root README. A passing set demonstrates the cases it executes, rather than all possible ownership patterns or Rust APIs.
+Unit tests remain alongside span, lexer, and standard-library implementations. Run `cargo test --workspace` and the explicit registry test from the root README. The release workflow runs the registry test; the fuzz and VS Code Extension Host workflows have separate commands. A passing set demonstrates the cases it executes, rather than all possible ownership patterns or Rust APIs.
 
 ## Design records
 

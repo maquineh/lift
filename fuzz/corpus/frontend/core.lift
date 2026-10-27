@@ -1,0 +1,5 @@
+interface Counter { value: int }
+impl Counter { add(n: int): int { this.value = this.value + n; return this.value; } }
+const counter: Counter = { value: 1 };
+const maybe: int? = null;
+console.log(`count ${counter.add(maybe ?? 2)}`);

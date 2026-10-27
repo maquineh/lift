@@ -46,7 +46,9 @@ leem arquivos salvos. Exemplo persistente `.vscode/tasks.json`:
 }
 ```
 
-`npm run check` valida sintaxe JavaScript. Testes Rust cobrem protocolo LSP,
-overlays do grafo, versões e UTF-16. O smoke test visual no host da extensão ainda
-é manual. É fonte local, sem publicação Marketplace. Completion, navegação,
-formatação, fixes e debugging continuam futuros.
+`npm run check` valida sintaxe JavaScript e `npm test` abre um Extension Development
+Host do VS Code, inicia o executável Lift real e verifica que um erro semântico em
+um buffer não salvo aparece e some após a correção. O CI executa esse teste com
+VS Code estável em Linux/Xvfb. Testes Rust cobrem protocolo LSP, overlays do grafo,
+versões e UTF-16. O smoke test visual continua manual. É fonte local, sem publicação
+Marketplace. Completion, navegação, formatação, fixes e debugging continuam futuros.

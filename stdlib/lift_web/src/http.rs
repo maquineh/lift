@@ -20,7 +20,10 @@ pub struct Response {
     pub body: String,
 }
 #[derive(Clone, Copy)]
-enum Handler { Plain(fn(Request) -> Response), Database(fn(Request, &lift_db::api::DbPool) -> Response) }
+enum Handler {
+    Plain(fn(Request) -> Response),
+    Database(fn(Request, &lift_db::api::DbPool) -> Response),
+}
 struct Route {
     method: String,
     path: String,
@@ -38,16 +41,32 @@ pub fn register_route(method: &str, path: &str, handler: fn(Request) -> Response
         handler: Handler::Plain(handler),
     });
 }
-pub fn register_db_route(method: &str, path: &str, handler: fn(Request, &lift_db::api::DbPool) -> Response) {
-    ROUTES.lock().expect("route registry poisoned").push(Route { method: method.into(), path: path.into(), handler: Handler::Database(handler) });
+pub fn register_db_route(
+    method: &str,
+    path: &str,
+    handler: fn(Request, &lift_db::api::DbPool) -> Response,
+) {
+    ROUTES.lock().expect("route registry poisoned").push(Route {
+        method: method.into(),
+        path: path.into(),
+        handler: Handler::Database(handler),
+    });
 }
 pub fn serve(address: &str, max_body_bytes: i64) -> Result<(), String> {
-    serve_inner(address,max_body_bytes,None)
+    serve_inner(address, max_body_bytes, None)
 }
-pub fn serve_with_pool(address: &str, max_body_bytes: i64, pool: lift_db::api::DbPool) -> Result<(), String> {
-    serve_inner(address,max_body_bytes,Some(pool))
+pub fn serve_with_pool(
+    address: &str,
+    max_body_bytes: i64,
+    pool: lift_db::api::DbPool,
+) -> Result<(), String> {
+    serve_inner(address, max_body_bytes, Some(pool))
 }
-fn serve_inner(address: &str, max_body_bytes: i64, pool: Option<lift_db::api::DbPool>) -> Result<(), String> {
+fn serve_inner(
+    address: &str,
+    max_body_bytes: i64,
+    pool: Option<lift_db::api::DbPool>,
+) -> Result<(), String> {
     if !(1..=1_048_576).contains(&max_body_bytes) {
         return Err("body limit must be between 1 and 1048576 bytes".into());
     }
@@ -59,7 +78,11 @@ fn serve_inner(address: &str, max_body_bytes: i64, pool: Option<lift_db::api::Db
     if routes.is_empty() {
         return Err("at least one static route is required".into());
     }
-    if pool.is_none() && routes.iter().any(|r| matches!(r.handler,Handler::Database(_))) {
+    if pool.is_none()
+        && routes
+            .iter()
+            .any(|r| matches!(r.handler, Handler::Database(_)))
+    {
         return Err("a database handler requires http.serve(address, body_limit, pool)".into());
     }
     let pool = pool.map(Arc::new);
@@ -130,7 +153,11 @@ async fn dispatch(
         let _permit = permit;
         match handler {
             Handler::Plain(handler) => handler(request),
-            Handler::Database(handler) => handler(request, pool.as_deref().expect("database routes require a server-owned pool")),
+            Handler::Database(handler) => handler(
+                request,
+                pool.as_deref()
+                    .expect("database routes require a server-owned pool"),
+            ),
         }
     })
     .await

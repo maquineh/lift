@@ -14,7 +14,7 @@ Lift aims to feel familiar to TypeScript users within a documented subset; it is
 - A working linker for the Rust host target.
 - Network access when a program imports a registry crate that is not already cached by Cargo.
 
-The current validation environment is Windows x86_64 with Rust/Cargo 1.94.1 and the MSVC host target. The minimum supported Rust version (MSRV) is 1.94.1; other hosts have not been validated yet. Build and run for the host target; cross-target binaries may not execute on the current machine.
+CI is configured for Windows and Ubuntu with Rust `stable` and MSRV 1.94.1. PostgreSQL 17 has a separate integration job. macOS and cross-compilation are not yet in the supported matrix; build and run for the host target.
 
 ## Build the CLI from this checkout
 
@@ -211,17 +211,27 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 Run the workspace suite with:
 
 ```sh
-cargo test --workspace
+cargo test --locked --workspace
 cargo fmt --all --check
 ```
+
+`lift_db`, `lift_web`, and the fuzz project have independent workspaces; their
+formatting and integration checks also run in CI. See the [testing and release
+matrix](docs/testing-and-release.md) for feature contracts and the release,
+fuzzing, and VS Code gates.
 
 The CLI tests copy the executable to another directory and run `check`, `build`, and `run` with the bundled core. They inspect Cargo metadata, exercise arguments/stdin/files, and check runtime failures. The registry test is excluded from the default suite because it may access the network; run it explicitly for release acceptance:
 
 ```sh
-cargo test -p lift_cli --test cli_end_to_end registry_import_consumes_a_real_pinned_rust_crate -- --ignored --exact
+cargo test --locked -p lift_cli --test cli_end_to_end registry_import_consumes_a_real_pinned_rust_crate -- --ignored --exact
 ```
 
-That test checks, builds, and runs the pinned registry example. Local tests validate the exercised language and host combinations; they do not establish compatibility with every safe Rust crate or every platform.
+That test checks, builds, and runs the pinned registry example. The [Lift release
+acceptance workflow](.github/workflows/release-acceptance.yml) runs it on `v*`
+tags or manual dispatch, together with the workspace, MSRV, formatting,
+PostgreSQL, and HTTP/SQLite acceptance checks. Passing tests cover the documented
+cases; they do not establish compatibility with every safe Rust crate or every
+platform.
 
 ## Repository map
 

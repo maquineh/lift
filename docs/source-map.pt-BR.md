@@ -62,6 +62,10 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `stdlib/lift_db/src/resource.rs` | Protocolo de conexão/transação owned com commit, rollback e descarte RAII. |
 | `crates/lift_sema/src/resources.rs` | Validação conservadora de fluxo afim e registro HTTP. |
 | `scripts/verify_notes.py` | Aceite portátil HTTP/SQLite com reinício e porta ocupada. |
+| `fuzz/Cargo.toml`, `fuzz/fuzz_targets/frontend.rs` | Alvo cargo-fuzz independente para fontes UTF-8 no lexer/parser/semântica e corpus inicial versionado. |
+| `crates/lift_sema/tests/frontend_robustness.rs` | Truncamentos/mutações determinísticos limitados e invariantes de spans UTF-8. |
+| `editors/vscode/test/` | Integração do Extension Host VS Code com o executável Lift/LSP real. |
+| `.github/workflows/` | Matriz stable/MSRV/plataformas, formatação, fuzz periódico, cliente VS Code e aceite de release. |
 | `examples/notes-service/db-smoke.lift` | Demonstra as operações SQLite fixas importadas pela FFI segura. |
 | `examples/notes-service/README.md`, `README.pt-BR.md` | Instruções bilíngues para compilar, configurar e chamar a PoC HTTP/SQLite. |
 
@@ -71,10 +75,12 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | --- | --- |
 | `crates/lift_parser/tests/parser_contract.rs` | Precedência, postfixos, recuperação, ponto e vírgula, imports e sintaxe de Result. |
 | `crates/lift_sema/tests/semantic_contract.rs` | Tipos, recursão, empréstimos, rejeição de aliasing, imports, builtins e validação de Result. |
+| `crates/lift_sema/tests/frontend_robustness.rs` | Mutações/truncamentos reproduzíveis, ausência de panic e spans de tokens válidos. |
 | `crates/lift_sema/tests/liveness_contract.rs` | Elegibilidade e contraexemplos conservadores em joins, retornos, loops, reatribuições, chamadas, parâmetros emprestados e projeções. |
 | `crates/lift_sema/tests/option_contract.rs` | Tipos/null, modos de coalesce lazy, campos obrigatórios, limites de inferência, ciclos, rejeição FFI e ownership conservador. |
 | `crates/lift_codegen/tests/codegen_contract.rs` | Contratos do Rust/Cargo gerados, wrappers, Result, clones e temporários de chamada. |
-| `crates/lift_cli/tests/cli_end_to_end.rs` | Compila/executa exemplos, relocação, caminhos Cargo, argumentos/stdin/arquivos, Result, relatórios Ariadne e verificação determinística de não reescrita. O teste registry é optativo por poder acessar a rede. |
+| `crates/lift_cli/tests/cli_end_to_end.rs` | Compila/executa exemplos, relocação, caminhos Cargo, argumentos/stdin/arquivos, Result, relatórios Ariadne, sessão LSP em processo, combinação de recursos e rejeição de aliasing. O teste registry usa a rede. |
+| `docs/testing-and-release.pt-BR.md` | Matriz recurso→teste, gates de CI, comandos de fuzzing e aceite de release. |
 | `examples/fibonacci.lift` | Controle de fluxo inteiro recursivo e iterativo. |
 | `examples/ownership.lift` | Mutação e valores próprios sem notação explícita de borrow Rust. |
 | `examples/interop.lift` | Imports locais seguros, arrays/strings emprestados e `console.log`. |
@@ -88,7 +94,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `examples/modules/math/api.lift`, `math/helpers.lift` | Imports relativos/transitivos, chamadas cruzadas e ciclos de módulo/root. |
 | `scripts/package.ps1` | Compila para o host Rust atual e cria ZIP portátil com executável, guias e exemplos. |
 
-Testes unitários ficam junto das implementações de spans, lexer e stdlib. Execute `cargo test --workspace` e o teste registry explícito indicado no README. A aprovação demonstra os casos executados, sem provar todos os padrões de ownership ou APIs Rust possíveis.
+Testes unitários ficam junto das implementações de spans, lexer e stdlib. Execute `cargo test --workspace` e o teste registry indicado no README; o workflow de release o executa automaticamente. Fuzzing e teste Extension Host têm workflows próprios. A aprovação demonstra os casos executados, sem provar todos os padrões de ownership ou APIs Rust possíveis.
 
 ## Registros de decisões
 

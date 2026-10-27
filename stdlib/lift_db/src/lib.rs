@@ -6,10 +6,10 @@
 use std::{error::Error, fmt, path::Path};
 
 use rusqlite::{params, Connection};
-pub mod resource;
 pub mod api;
-mod value;
+pub mod resource;
 mod sql;
+mod value;
 
 #[derive(Debug)]
 pub struct DbError(rusqlite::Error);

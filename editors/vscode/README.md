@@ -46,7 +46,10 @@ saved disk files. Persistent `.vscode/tasks.json` example:
 }
 ```
 
-`npm run check` checks client JavaScript syntax. Rust tests cover LSP protocol,
-graph overlays, versions and UTF-16. A live extension-host UI smoke test is still
-manual. This is local source, not a Marketplace publication. Completion,
-navigation, formatting, fixes and debugging remain future work.
+`npm run check` checks client JavaScript syntax and `npm test` launches a VS Code
+Extension Development Host, starts the real Lift executable, and verifies that a
+semantic error in an unsaved buffer appears and clears after correction. CI runs
+this test with stable VS Code on Linux/Xvfb. Rust tests cover LSP protocol, graph
+overlays, versions and UTF-16. The visual smoke test remains manual. This is local
+source, not a Marketplace publication. Completion, navigation, formatting, fixes
+and debugging remain future work.

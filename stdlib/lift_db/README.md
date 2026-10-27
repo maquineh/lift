@@ -101,7 +101,7 @@ chooses plaintext for local/CI use. Missing/prefer modes fail configuration.
 URLs/credentials are redacted from connection errors and not logged by the pool.
 These guarantees come from the configured [native-tls validation defaults](https://docs.rs/native-tls/0.2.18/native_tls/struct.TlsConnectorBuilder.html), rather than the word `require` alone.
 
-Dependencies are pinned: rusqlite 0.40.1 (bundled SQLite), postgres 0.19.14,
+Dependencies are pinned: rusqlite 0.40.2 (bundled SQLite), postgres 0.19.14,
 postgres-native-tls 0.5.3, native-tls 0.2.18 and r2d2 0.8.10. Linux needs
 pkg-config/OpenSSL development libraries; Windows uses the platform TLS provider.
 

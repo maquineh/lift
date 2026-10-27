@@ -99,7 +99,7 @@ local/CI. Modo ausente/prefer é rejeitado. URLs/credenciais são removidas dos
 erros de conexão e o pool não as registra. A verificação depende das
 [configurações native-tls](https://docs.rs/native-tls/0.2.18/native_tls/struct.TlsConnectorBuilder.html), não apenas da palavra `require`.
 
-Dependências fixadas: rusqlite 0.40.1 com SQLite bundled, postgres 0.19.14,
+Dependências fixadas: rusqlite 0.40.2 com SQLite bundled, postgres 0.19.14,
 postgres-native-tls 0.5.3, native-tls 0.2.18 e r2d2 0.8.10. Linux precisa de
 pkg-config e bibliotecas de desenvolvimento OpenSSL; Windows usa TLS do sistema.
 

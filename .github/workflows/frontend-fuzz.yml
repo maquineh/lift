@@ -1,0 +1,23 @@
+name: Lift frontend fuzzing
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz run frontend -- -max_len=2048 -max_total_time=60 -timeout=5
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lift-frontend-fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

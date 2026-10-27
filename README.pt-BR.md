@@ -19,7 +19,7 @@ Lift busca ser familiar para quem usa TypeScript dentro de um subconjunto docume
 - Linker funcional para o target hospedeiro do Rust.
 - Acesso à rede quando o programa importar uma crate registry que ainda não esteja no cache do Cargo.
 
-O ambiente validado atualmente é Windows x86_64 com Rust/Cargo 1.94.1 e target hospedeiro MSVC. A versão mínima suportada (MSRV) é 1.94.1; outros hosts ainda não foram validados. Compile e execute para o host; binários de compilação cruzada podem não executar nesta máquina.
+A matriz de CI está configurada para Windows e Ubuntu com Rust `stable` e MSRV 1.94.1. PostgreSQL 17 tem um job de integração separado. macOS e compilação cruzada ainda não fazem parte da matriz suportada; compile e execute para o host.
 
 ## Compile a CLI a partir deste checkout
 
@@ -210,17 +210,21 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 Execute a suíte do workspace com:
 
 ```sh
-cargo test --workspace
+cargo test --locked --workspace
 cargo fmt --all --check
 ```
+
+`lift_db`, `lift_web` e o projeto de fuzzing têm workspaces próprios; seus checks
+de formatação e integração também fazem parte do CI. A [matriz de testes e aceite](docs/testing-and-release.pt-BR.md)
+relaciona os contratos a cada camada e descreve os gates de release, fuzzing e VS Code.
 
 Os testes da CLI copiam o executável para outro diretório e executam `check`, `build` e `run` com o core embutido. Eles inspecionam metadados Cargo, exercitam argumentos/stdin/arquivos e verificam falhas de runtime. O teste registry fica fora da suíte padrão porque pode acessar a rede; execute-o explicitamente para o aceite de release:
 
 ```sh
-cargo test -p lift_cli --test cli_end_to_end registry_import_consumes_a_real_pinned_rust_crate -- --ignored --exact
+cargo test --locked -p lift_cli --test cli_end_to_end registry_import_consumes_a_real_pinned_rust_crate -- --ignored --exact
 ```
 
-Esse teste verifica, compila e executa o exemplo registry com versão fixada. Os testes locais validam as combinações de linguagem e host exercitadas; não demonstram compatibilidade com toda crate Rust segura ou toda plataforma.
+Esse teste verifica, compila e executa o exemplo registry com versão fixada. O workflow [Lift release acceptance](.github/workflows/release-acceptance.yml) executa-o em tags `v*` ou por despacho manual, além da suíte workspace, MSRV, formatação e aceites PostgreSQL/HTTP/SQLite. Os testes executados cobrem os contratos listados; não demonstram compatibilidade com toda crate Rust segura ou toda plataforma.
 
 ## Mapa do repositório
 

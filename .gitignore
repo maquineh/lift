@@ -1,4 +1,10 @@
 /target/
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/coverage/
+/stdlib/lift_db/target/
+/stdlib/lift_web/target/
+/editors/vscode/.vscode-test/
 **/.lift_cache/
 /dist/
 /editors/vscode/node_modules/

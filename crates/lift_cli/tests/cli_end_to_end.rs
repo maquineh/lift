@@ -125,6 +125,143 @@ fn lsp_executable_emits_framed_protocol_without_cli_chatter() {
 }
 
 #[test]
+fn lsp_process_publishes_and_clears_diagnostics_for_unsaved_edits() {
+    let directory = TempDir::new("lsp-process-session");
+    let source = directory.path().join("main.lift");
+    fs::write(&source, "console.log(0);").unwrap();
+    let uri = file_uri(&source);
+    let messages = [
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"initializationOptions":{"entry":uri}}}),
+        serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"lift","version":1,"text":"const answer: int = true;"}}}),
+        serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":2},"contentChanges":[{"text":"console.log(42);"}]}}),
+        serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":uri}}}),
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"shutdown"}),
+        serde_json::json!({"jsonrpc":"2.0","method":"exit"}),
+    ];
+    let mut input = String::new();
+    for message in messages {
+        let body = message.to_string();
+        input.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+    }
+
+    let mut command = cli();
+    command.args(["lsp", "--stdio"]);
+    let result = run_with_input(command, &input);
+    assert_success(
+        &result,
+        "LSP process editing session with explicit stdio transport",
+    );
+    assert!(result.stderr.is_empty());
+
+    let mut bytes = result.stdout.as_slice();
+    let mut output = Vec::new();
+    while !bytes.is_empty() {
+        let delimiter = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
+        let header = std::str::from_utf8(&bytes[..delimiter]).unwrap();
+        let length: usize = header
+            .strip_prefix("Content-Length: ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let body = &bytes[delimiter + 4..delimiter + 4 + length];
+        output.push(serde_json::from_slice::<serde_json::Value>(body).unwrap());
+        bytes = &bytes[delimiter + 4 + length..];
+    }
+
+    assert!(
+        output.iter().any(|message| {
+            message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == uri
+                && message["params"]["version"] == 1
+                && message["params"]["diagnostics"][0]["code"] == "sema.TypeMismatch"
+        }),
+        "{output:?}"
+    );
+    assert!(
+        output.iter().any(|message| {
+            message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == uri
+                && message["params"]["version"] == 2
+                && message["params"]["diagnostics"] == serde_json::json!([])
+        }),
+        "{output:?}"
+    );
+    assert!(
+        output.iter().any(|message| {
+            message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == uri
+                && message["params"].get("version").is_none()
+                && message["params"]["diagnostics"] == serde_json::json!([])
+        }),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn cross_feature_acceptance_matrix_compiles_and_runs_supported_patterns() {
+    let directory = TempDir::new("feature-matrix");
+    let source = directory.path().join("matrix.lift");
+    fs::write(
+        &source,
+        r#"
+interface Counter { value: int }
+impl Counter {
+    add(amount: int): int {
+        this.value = this.value + amount;
+        return this.value;
+    }
+}
+const counter: Counter = { value: 1 };
+const snapshot = (): int => counter.value;
+let iterations = 0;
+while iterations < 1 { iterations = iterations + 1; }
+const selected: int? = null;
+const values: int[] = [counter.add(selected ?? 2), iterations];
+console.log(snapshot());
+console.log(`total ${values[0]}`);
+"#,
+    )
+    .unwrap();
+
+    let checked = cli().arg("check").arg(&source).output().unwrap();
+    assert_success(&checked, "cross-feature matrix check");
+    let output = cli().arg("run").arg(&source).output().unwrap();
+    assert_success(&output, "cross-feature matrix run");
+    let stdout = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert!(
+        stdout.ends_with("1\ntotal 3\n"),
+        "the Lift output must match the compiled program: {stdout}"
+    );
+}
+
+#[test]
+fn ownership_aliasing_rejection_is_reported_before_rustc() {
+    let directory = TempDir::new("ownership-diagnostic");
+    let source = directory.path().join("aliasing.lift");
+    fs::write(
+        &source,
+        "interface Counter { value: int } function update(left: Counter, right: Counter): void { left.value = left.value + 1; right.value = right.value + 1; } const counter: Counter = { value: 0 }; update(counter, counter);",
+    )
+    .unwrap();
+
+    let output = cli().arg("check").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("aliasing.lift:1:"), "{stderr}");
+    assert!(stderr.contains("Error:"), "{stderr}");
+    assert!(
+        !stderr.contains("error[E"),
+        "ownership must fail in Lift: {stderr}"
+    );
+    assert!(!stderr.contains("could not compile"), "{stderr}");
+}
+
+#[test]
 fn methods_closures_and_templates_compile_and_run() {
     let temp = TempDir::new("methods-closures-templates");
     let source = temp.path().join("features.lift");
@@ -164,6 +301,32 @@ impl Drop for TempDir {
 
 fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_lift"))
+}
+
+fn file_uri(path: &Path) -> String {
+    let path = path.canonicalize().unwrap();
+    let path = path.to_string_lossy();
+    #[cfg(windows)]
+    let path = path
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!("//{rest}"))
+        .unwrap_or_else(|| path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned())
+        .replace('\\', "/");
+    #[cfg(not(windows))]
+    let path = path.into_owned();
+    let mut uri = if path.starts_with('/') {
+        String::from("file://")
+    } else {
+        String::from("file:///")
+    };
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b':' | b'-' | b'_' | b'.' | b'~') {
+            uri.push(char::from(byte));
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
 }
 
 fn forklift() -> Command {

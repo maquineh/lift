@@ -1,0 +1,24 @@
+[package]
+name = "lift-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+lift_lexer = { path = "../crates/lift_lexer" }
+lift_parser = { path = "../crates/lift_parser" }
+lift_sema = { path = "../crates/lift_sema" }
+
+[[bin]]
+name = "frontend"
+path = "fuzz_targets/frontend.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

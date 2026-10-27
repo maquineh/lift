@@ -40,12 +40,12 @@ implementação. Consulte a
 [fallback de `tokio-postgres`](https://github.com/rust-postgres/rust-postgres/blob/master/tokio-postgres/src/prepare.rs)
 e a [API do cliente `postgres`](https://docs.rs/postgres/latest/postgres/struct.Client.html).
 
-Para SQLite, o README do `rusqlite` 0.40.1 documenta o mínimo 3.34.1 para seus
+Para SQLite, o README do `rusqlite` 0.40.2 documenta o mínimo 3.34.1 para seus
 bindings básicos; algumas features podem exigir uma versão mais nova. A feature
 `bundled` compila SQLite junto da aplicação e essa release inclui SQLite 3.53.2.
 A implementação deve fixar a crate, a versão de SQLite e testar as features
 escolhidas; não deve depender de uma biblioteca indefinida do sistema. Consulte
-o [README do `rusqlite` 0.40.1](https://github.com/rusqlite/rusqlite/blob/v0.40.1/README.md).
+o [README do `rusqlite` 0.40.2](https://github.com/rusqlite/rusqlite/blob/v0.40.2/README.md).
 
 Oracle fica para um adaptador posterior. A Oracle publica um driver Rust puro
 que não depende do Oracle Client, mas a versão consultada para este plano ainda
@@ -102,5 +102,5 @@ versão de servidor, não apenas em um servidor mais novo:
 - [Política de versionamento do PostgreSQL](https://www.postgresql.org/support/versioning/)
 - [Política do SQLx para versões de banco](https://github.com/transact-rs/sqlx/blob/main/FAQ.md#what-database-versions-does-sqlx-support)
 - [Código fallback de compatibilidade `tokio-postgres`](https://github.com/rust-postgres/rust-postgres/blob/master/tokio-postgres/src/prepare.rs)
-- [README do `rusqlite` 0.40.1](https://github.com/rusqlite/rusqlite/blob/v0.40.1/README.md)
+- [README do `rusqlite` 0.40.2](https://github.com/rusqlite/rusqlite/blob/v0.40.2/README.md)
 - [Driver Rust mantido pela Oracle](https://github.com/oracle/rust-oracledb)

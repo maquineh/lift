@@ -6,25 +6,106 @@
   "version": "0.1.0",
   "publisher": "lift-local",
   "private": true,
-  "repository": { "type": "git", "url": "https://github.com/maquineh/truxt.git", "directory": "editors/vscode" },
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Programming Languages", "Linters"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maquineh/truxt.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:lift", "onTaskType:lift"],
-  "capabilities": { "untrustedWorkspaces": { "supported": false } },
+  "activationEvents": [
+    "onLanguage:lift",
+    "onTaskType:lift"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
   "contributes": {
-    "languages": [{ "id": "lift", "aliases": ["Lift", "lift"], "extensions": [".lift"], "configuration": "./language-configuration.json" }],
-    "grammars": [{ "language": "lift", "scopeName": "source.lift", "path": "./syntaxes/lift.tmLanguage.json" }],
-    "commands": [{ "command": "lift.restartServer", "title": "Lift: Restart Language Server" }],
+    "languages": [
+      {
+        "id": "lift",
+        "aliases": [
+          "Lift",
+          "lift"
+        ],
+        "extensions": [
+          ".lift"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lift",
+        "scopeName": "source.lift",
+        "path": "./syntaxes/lift.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "lift.restartServer",
+        "title": "Lift: Restart Language Server"
+      }
+    ],
     "configuration": {
       "title": "Lift",
       "properties": {
-        "lift.serverPath": { "type": "string", "default": "lift", "scope": "window", "description": "Lift executable on PATH or absolute path (without arguments)." },
-        "lift.entry": { "type": "string", "default": "", "scope": "window", "description": "Project entry relative to the first workspace folder, or absolute. Empty analyzes each open file as an entry. Restart applies changes." }
+        "lift.serverPath": {
+          "type": "string",
+          "default": "lift",
+          "scope": "window",
+          "description": "Lift executable on PATH or absolute path (without arguments)."
+        },
+        "lift.entry": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Project entry relative to the first workspace folder, or absolute. Empty analyzes each open file as an entry. Restart applies changes."
+        }
       }
     },
-    "taskDefinitions": [{ "type": "lift", "required": ["command", "file"], "properties": { "command": { "type": "string", "enum": ["check", "build", "lint", "run"] }, "file": { "type": "string", "description": "Source entry, relative to the task workspace folder or absolute." } } }]
+    "taskDefinitions": [
+      {
+        "type": "lift",
+        "required": [
+          "command",
+          "file"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "check",
+              "build",
+              "lint",
+              "run"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "description": "Source entry, relative to the task workspace folder or absolute."
+          }
+        }
+      }
+    ]
   },
-  "scripts": { "check": "node --check extension.js" },
-  "dependencies": { "vscode-languageclient": "9.0.1" }
+  "scripts": {
+    "check": "node --check extension.js && node --check test/runTest.js && node --check test/suite/index.js && node --check test/suite/extension.test.js",
+    "test": "node test/runTest.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^3.1.0",
+    "mocha": "^12.0.3"
+  }
 }

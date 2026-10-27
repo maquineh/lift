@@ -140,7 +140,11 @@ enum Commands {
         deny_warnings: bool,
     },
     /// Inicia o servidor de linguagem via JSON-RPC em stdio.
-    Lsp,
+    Lsp {
+        /// Compatibilidade com clientes LSP que indicam explicitamente o transporte padrão.
+        #[arg(long, help = "Usa stdin/stdout para JSON-RPC (transporte padrão)")]
+        stdio: bool,
+    },
     /// Cria um diretório com um arquivo `main.lift` inicial.
     Init {
         /// Diretório destino (padrão: diretório atual).
@@ -428,7 +432,9 @@ fn dispatch(command: Commands) -> Result<u8, CliError> {
                             .any(|d| d.severity == Severity::Warning)),
             ))
         }
-        Commands::Lsp => lsp::serve().map_err(|error| CliError::message(error.to_string())),
+        Commands::Lsp { stdio: _ } => {
+            lsp::serve().map_err(|error| CliError::message(error.to_string()))
+        }
         Commands::Init { directory } => {
             init_project(&directory)?;
             Ok(0)
