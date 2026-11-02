@@ -2,7 +2,7 @@
 
 - **Data:** 2026-11-02 (America/Manaus)
 - **Branch:** `main`
-- **Último commit antes deste checkpoint:** `312a080 feat: add named payload fields to enums`
+- **Último commit antes deste checkpoint:** `93e9a18 feat: support recursive enums and enum interface fields`
 - **Estado:** incrementos abaixo implementados, testados, documentados e reunidos neste checkpoint. O working tree fica limpo após o commit; `target/` e `.lift_cache/` são ignorados.
 
 Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR tipado → Rust → binário). Ele complementa a matriz de testes e os contratos em `docs/`; não substitui essas fontes.
@@ -20,6 +20,7 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 9. **Enums nominais com payloads** — `enum Nome { Variante, Variante(Tipo, Tipo) }`, construção `Enum.Variant(...)`, igualdade estrutural, uso em arrays/parâmetros/retornos/Option/Result e `match` exaustivo com patterns qualificados `Enum.Variant(bindings)`.
 10. **Enums com campos nomeados** — `Variante { campo: Tipo }`, construção `Enum.Variant({ campo: valor })`, validação de campos ausentes/desconhecidos/duplicados e match posicional na ordem de declaração.
 11. **Recursão e enums em interfaces** — payloads recursivos com `Box` automático, enums mutuamente recursivos, ciclos struct↔enum e campos de enum em interfaces.
+12. **Uniões nominais `type A = B | C`** — membros nominais desaçucarados para um enum, construção por `Shape.Circle(...)`, match exaustivo, membros enum e recursão.
 
 ## Contratos e limites atuais
 
@@ -30,7 +31,7 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 - Métodos de array não têm `flatMap`, `sort`, parâmetro de índice, iteradores lazy ou métodos mutantes (`push`/`pop`).
 - `match` cobre `Option`/`Result` e enums nominais; não há wildcard, guardas, patterns aninhados, match de primitivos ou sintaxe de union TypeScript.
 - Generics gerais continuam ausentes (`Result` é o único tipo genérico embutido).
-- Enums suportam payloads posicionais/nomeados, recursão com `Box` automático e campos de interface; não há discriminantes explícitos, enums em FFI, métodos em enums ou `type A = B | C`.
+- Enums e uniões suportam payloads posicionais/nomeados, recursão com `Box` automático, campos de interface e `type A = B | C`; não há membros primitivos/arrays/Option em uniões, tipos union inline, discriminantes explícitos, enums em FFI ou métodos em enums.
 - Option não entra em arrays/Result aninhado; recursos opacos seguem as regras de ownership e não podem ser payload de `Option` comum nem scrutinee de `match`.
 
 ## Verificação executada neste checkpoint
@@ -41,7 +42,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 ```
 
 - Formatação: limpa.
-- Testes: **230 passando**, **37 suítes**, 0 falhas.
+- Testes: **235 passando**, **38 suítes**, 0 falhas.
 - E2E por `check`, `build`, `run` e binário nativo dos exemplos:
   - `examples/loops.lift` → `6 1 2 3 7 8 1 3 4 5 10 20`
   - `examples/array-methods.lift` → `2 8 1 2 4 3 true true 1 2 3 4 10 #3 20 200`
@@ -49,8 +50,9 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - `examples/enums.lift` → `12.56 / circle 2 / 6 / rect 2x3 / 0 / empty / true / true / false`
   - `examples/enum-fields.lift` → `12.56 / 6 / 0 / circle 2 / true`
   - `examples/recursive-enums.lift` → `6 / 3 / true`
+  - `examples/unions.lift` → `12.56 / 9 / true / false / north / other / 1`
   - `examples/errors.lift` e `examples/higher-order.lift` também cobertos por E2E.
-- `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift` e `examples/recursive-enums.lift`: sem avisos.
+- `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift` e `examples/recursive-enums.lift` e `examples/unions.lift`: sem avisos.
 - Skips conhecidos e **pré-existentes** (não causados por estes incrementos): testes de banco cuja cadeia de dependências (`r2d2`/`scheduled-thread-pool`) pede rustc mais novo que o MSRV 1.94.1. Eles permanecem documentados na matriz de testes e devem ser reavaliados quando a dependência for atualizada.
 
 ## Onde retomar
@@ -68,11 +70,11 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 - Matriz de cobertura e pendências: [docs/testing-and-release.md](docs/testing-and-release.md).
 - Mapa de crates, arquivos e exemplos: [docs/source-map.md](docs/source-map.md).
 - Decisões internas: [phase3](.agents/skills/truxt-compiler/references/phase3-decisions.md), [phase4](.agents/skills/truxt-compiler/references/phase4-decisions.md) e [phase5](.agents/skills/truxt-compiler/references/phase5-decisions.md).
-- Exemplos executáveis: `examples/option.lift`, `examples/interop.lift`, `examples/errors.lift`, `examples/higher-order.lift`, `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift`, `examples/recursive-enums.lift`.
+- Exemplos executáveis: `examples/option.lift`, `examples/interop.lift`, `examples/errors.lift`, `examples/higher-order.lift`, `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift`, `examples/recursive-enums.lift`, `examples/unions.lift`.
 
 ## Próximos passos sugeridos
 
-1. **Enums avançados/unions** — sintaxe `type A = B | C` (recursão e interfaces concluídas).
+1. **Enums avançados/unions** — concluído (campos nomeados, recursão, interfaces e `type A = B | C`).
 2. **Generics gerais** — containers e funções parametrizadas; maior incremento restante.
 3. **Captures mutáveis/`FnMut`** — hoje acumuladores usam `reduce` ou `for...of` explícito.
 4. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.

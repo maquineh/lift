@@ -171,3 +171,15 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   ciclo struct-only existente permanece ativa.
 - Teste `recursive_enums_and_interface_fields_use_box_indirection`; exemplo
   `examples/recursive-enums.lift`; E2E cobre List/Tree/Holder.
+### Uniões nominais `type A = B | C`
+
+- Lexer adiciona `type` e `|` (Pipe); AST `UnionDeclaration { name, members }`;
+  parser exige membros `TypeExpressionKind::Named` e `;` final.
+- Sema `resolve_unions` desaçucara para `HirEnum`/`EnumInfo`: uma variante
+  posicional por membro, nome da variante = nome do tipo, field type
+  `Struct(member)`; `field_boxed` calculado com `type_needs_box`.
+- Membros precisam ser tipos nominais (interface/enum/union); primitivos,
+  arrays, Option/Result, `void` e tipos inline são rejeitados. Nome entra no
+  namespace de tipos (duplicatas rejeitadas); forward refs permitidas.
+- Construção/matching/igualdade/recursão reutilizam o caminho de enum; exemplo
+  `examples/unions.lift`, testes `union_contract.rs`, docs `docs/unions*.md`.

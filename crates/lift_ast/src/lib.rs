@@ -32,6 +32,8 @@ pub enum Declaration {
     Interface(InterfaceDeclaration),
     /// Enum nominal com variantes posicionais e payloads owned.
     Enum(EnumDeclaration),
+    /// `type Nome = A | B;`: união nominal desaçucarada para enum.
+    Union(UnionDeclaration),
     Function(FunctionDeclaration),
     Import(ImportFunctionDeclaration),
     /// Interface externa mapeada para um tipo Rust declarado em outra crate.
@@ -49,6 +51,7 @@ impl Declaration {
             Self::Impl(node) => node.span,
             Self::Interface(node) => node.span,
             Self::Enum(node) => node.span,
+            Self::Union(node) => node.span,
             Self::Function(node) => node.span,
             Self::Import(node) => node.span,
             Self::ImportInterface(node) => node.span,
@@ -128,6 +131,13 @@ pub struct ImportInterfaceDeclaration {
     pub fields: Vec<InterfaceField>,
     pub source: String,
     pub source_span: Span,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnionDeclaration {
+    pub name: Identifier,
+    pub members: Vec<TypeExpression>,
     pub span: Span,
 }
 

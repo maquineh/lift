@@ -430,7 +430,7 @@ impl<'ast> Analyzer<'ast> {
                         declarations.push(HirDeclaration::Struct(item.clone()));
                     }
                 }
-                Declaration::Enum(_) => {
+                Declaration::Enum(_) | Declaration::Union(_) => {
                     if let Some(item) = self.enum_by_declaration.get(&index) {
                         declarations.push(HirDeclaration::Enum(item.clone()));
                     }
@@ -494,6 +494,7 @@ impl<'ast> Analyzer<'ast> {
                 Declaration::Interface(interface) => &interface.name,
                 Declaration::ImportInterface(interface) => &interface.name,
                 Declaration::Enum(enumeration) => &enumeration.name,
+                Declaration::Union(union) => &union.name,
                 _ => continue,
             };
             let name_text = name.name.clone();
@@ -543,6 +544,10 @@ impl<'ast> Analyzer<'ast> {
                     names.insert(enumeration.name.name.clone());
                     enum_names.insert(enumeration.name.name.clone());
                 }
+                Declaration::Union(union) => {
+                    names.insert(union.name.name.clone());
+                    enum_names.insert(union.name.name.clone());
+                }
                 _ => {}
             }
         }
@@ -587,6 +592,7 @@ impl<'ast> Analyzer<'ast> {
             }
         }
         self.resolve_enums(&names, &enum_names);
+        self.resolve_unions(&names, &enum_names);
     }
 
     /// Resolve os payloads das variantes; enums não podem conter enums nesta fase.
@@ -752,6 +758,106 @@ impl<'ast> Analyzer<'ast> {
         }
     }
 
+    /// `type Nome = A | B;` vira um `HirEnum` com uma variante por membro.
+    fn resolve_unions(&mut self, names: &HashSet<String>, enum_names: &HashSet<String>) {
+        for (index, declaration) in self.ast.declarations.iter().enumerate() {
+            let Declaration::Union(union) = declaration else {
+                continue;
+            };
+            let mut variants = Vec::new();
+            let mut seen = HashMap::<String, Span>::new();
+            let mut valid = true;
+            if union.members.is_empty() {
+                self.errors.push(SemaError::new(
+                    SemaErrorKind::UnsupportedType,
+                    format!("união `{}` precisa de ao menos um membro", union.name.name),
+                    union.name.span,
+                ));
+                continue;
+            }
+            for member in &union.members {
+                let lift_ast::TypeExpressionKind::Named(identifier) = &member.kind else {
+                    self.errors.push(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "união exige tipos nomeados como membros",
+                        member.span,
+                    ));
+                    valid = false;
+                    continue;
+                };
+                let ty = match resolve_type(member, names, TypePosition::Field) {
+                    Ok(ty) => ty,
+                    Err(error) => {
+                        self.errors.push(error);
+                        valid = false;
+                        continue;
+                    }
+                };
+                let ResolvedType::Struct(member_name) = &ty else {
+                    self.errors.push(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        format!(
+                            "membro `{}` de união precisa ser um tipo nominal (interface/enum)",
+                            identifier.name
+                        ),
+                        member.span,
+                    ));
+                    valid = false;
+                    continue;
+                };
+                if let Some(previous) = seen.insert(member_name.clone(), member.span) {
+                    self.errors.push(
+                        SemaError::new(
+                            SemaErrorKind::DuplicateDeclaration,
+                            format!(
+                                "membro duplicado `{member_name}` na união `{}`",
+                                union.name.name
+                            ),
+                            member.span,
+                        )
+                        .with_secondary(previous),
+                    );
+                    valid = false;
+                    continue;
+                }
+                let mut visited = HashSet::new();
+                let boxed = type_needs_box(&ty, enum_names, &self.structures, &mut visited);
+                variants.push(EnumVariantInfo {
+                    name: member_name.clone(),
+                    fields: vec![ty],
+                    field_boxed: vec![boxed],
+                    named_fields: Vec::new(),
+                    span: member.span,
+                });
+            }
+            if valid {
+                self.enums.insert(
+                    union.name.name.clone(),
+                    EnumInfo {
+                        variants: variants.clone(),
+                    },
+                );
+                self.enum_by_declaration.insert(
+                    index,
+                    HirEnum {
+                        name: union.name.name.clone(),
+                        variants: variants
+                            .into_iter()
+                            .map(|variant| HirEnumVariant {
+                                name: variant.name,
+                                fields: variant.fields,
+                                field_boxed: variant.field_boxed,
+                                named_fields: Vec::new(),
+                                span: variant.span,
+                            })
+                            .collect(),
+                        span: union.span,
+                    },
+                );
+            }
+        }
+    }
+
     /// Campos de interface validados para o tipo local ou para o layout externo.
     /// PT-BR: campos validados para struct local ou layout externo.
     fn resolve_struct_fields(
@@ -759,7 +865,7 @@ impl<'ast> Analyzer<'ast> {
         source: &[lift_ast::InterfaceField],
         names: &HashSet<String>,
         extern_names: &HashSet<String>,
-        enum_names: &HashSet<String>,
+        _enum_names: &HashSet<String>,
         external: bool,
     ) -> Option<Vec<HirStructField>> {
         let mut fields = Vec::new();
@@ -910,6 +1016,9 @@ impl<'ast> Analyzer<'ast> {
                     ..
                 })
                 | Declaration::Enum(lift_ast::EnumDeclaration {
+                    name: identifier, ..
+                })
+                | Declaration::Union(lift_ast::UnionDeclaration {
                     name: identifier, ..
                 }) => {
                     let name = identifier.name.clone();

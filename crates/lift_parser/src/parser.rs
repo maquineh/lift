@@ -11,7 +11,8 @@ use lift_ast::{
     InterfaceField, MatchArm, MatchPattern, MatchPatternKind, MatchStatement,
     ModuleImportDeclaration, ObjectField, ObjectLiteral, Parameter, ProgramAst, ReturnStatement,
     SourceId, Span, Statement, ThrowStatement, TryCatchStatement, TypeExpression,
-    TypeExpressionKind, UnaryExpression, UnaryOperator, VariableDeclaration, WhileStatement,
+    TypeExpressionKind, UnaryExpression, UnaryOperator, UnionDeclaration, VariableDeclaration,
+    WhileStatement,
 };
 use lift_lexer::Token;
 
@@ -100,6 +101,7 @@ impl<'tokens> Parser<'tokens> {
                             token,
                             Token::Interface
                                 | Token::Enum
+                                | Token::Type
                                 | Token::Const
                                 | Token::Let
                                 | Token::Impl
@@ -163,6 +165,7 @@ impl<'tokens> Parser<'tokens> {
                 .parse_interface_declaration()
                 .map(Declaration::Interface),
             Some(Token::Enum) => self.parse_enum_declaration().map(Declaration::Enum),
+            Some(Token::Type) => self.parse_union_declaration().map(Declaration::Union),
             Some(Token::Function) => self.parse_function_declaration().map(Declaration::Function),
             _ => self.parse_statement().map(Declaration::Statement),
         }
@@ -268,6 +271,34 @@ impl<'tokens> Parser<'tokens> {
             name,
             variants,
             span: self.span(start, close),
+        })
+    }
+
+    /// `type Nome = A | B;`: união nominal desaçucarada para enum.
+    fn parse_union_declaration(&mut self) -> Result<UnionDeclaration, ParseError> {
+        let start = self.expect(is_type, "`type`")?.start;
+        let name = self.parse_identifier()?;
+        self.expect(is_equal, "`=`")?;
+        let mut members = Vec::new();
+        loop {
+            let member = self.parse_type()?;
+            if !matches!(member.kind, TypeExpressionKind::Named(_)) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnexpectedToken,
+                    "união exige tipos nomeados como membros",
+                    member.span,
+                ));
+            }
+            members.push(member);
+            if self.consume(is_pipe).is_none() {
+                break;
+            }
+        }
+        let end = self.expect(is_semicolon, "`;`")?.end;
+        Ok(UnionDeclaration {
+            name,
+            members,
+            span: self.span(start, end),
         })
     }
 
@@ -1383,7 +1414,9 @@ impl<'tokens> Parser<'tokens> {
                 | Token::Continue
                 | Token::Return,
             ) => true,
-            Some(Token::Function | Token::Interface | Token::Enum | Token::Import) => !in_block,
+            Some(
+                Token::Function | Token::Interface | Token::Enum | Token::Type | Token::Import,
+            ) => !in_block,
             _ => false,
         }
     }
@@ -1494,6 +1527,12 @@ fn is_while(token: &Token) -> bool {
 }
 fn is_enum(token: &Token) -> bool {
     matches!(token, Token::Enum)
+}
+fn is_type(token: &Token) -> bool {
+    matches!(token, Token::Type)
+}
+fn is_pipe(token: &Token) -> bool {
+    matches!(token, Token::Pipe)
 }
 fn is_dot(token: &Token) -> bool {
     matches!(token, Token::Dot)

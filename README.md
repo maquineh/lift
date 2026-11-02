@@ -252,6 +252,31 @@ const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 
 A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `Shape.Circle({ radius: 2.0 })`, and a payload-less variant with `Shape.Empty`; payload count/field names/types are checked. Enums are value types with structural equality, usable in arrays, parameters, returns, and `Option`/`Result` payloads. Matching requires exactly one arm per variant and binds payloads positionally; missing/duplicate/unknown variants are rejected. Enums can be interface fields and recursive payloads are wrapped in compiler-inserted `Box`; FFI parameters/returns still reject enums, and there are no explicit discriminants or TypeScript `type A = B | C` unions. Named-field variants bind positionally in field declaration order when matched. See [enums](docs/enums.md).
 
+## Union types
+
+`type Shape = Circle | Square;` declares a nominal union whose members are existing named types. It lowers to an enum with one positional variant per member:
+
+```lift
+interface Circle { radius: number }
+interface Square { side: number }
+
+type Shape = Circle | Square;
+
+function area(shape: Shape): number {
+    match shape {
+        Shape.Circle(circle) => { return 3.14 * circle.radius * circle.radius; }
+        Shape.Square(square) => { return square.side * square.side; }
+    }
+}
+
+const shapes: Shape[] = [
+    Shape.Circle({ radius: 2.0 }),
+    Shape.Square({ side: 3.0 }),
+];
+```
+
+Members must be nominal interfaces/enums/unions; primitives, arrays, `Option`/`Result`, and inline structural types are rejected as members (wrap them in an interface). Construction uses `Shape.Circle(value)` (an object literal is accepted when the member is a struct), and matching is exhaustive over the member variants. Recursive unions, interface fields, enum members, equality, and module-level declarations follow the enum contract. FFI still rejects them. There is no inline `A | B` type, general alias, discriminant narrowing, or anonymous union value. See [union types](docs/unions.md).
+
 ## Optional values
 
 Use `T?`, contextual `null`, and explicit `option.some(value)`:
@@ -306,7 +331,8 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 - Loops cover `while` and `for...of` over arrays with `break`/`continue`; C-style `for`, labels, ranges, iterator protocol, and loop expressions are not implemented.
 - Array methods cover `map`, `filter`, `find`, `some`, `every`, `forEach`, and `reduce`; `flatMap`, `sort`, index parameters, lazy iterators, and mutating methods such as `push` are not implemented.
 - Matching covers `Option`/`Result` and nominal enums; wildcards, guards, nested patterns, and TypeScript union types are not implemented.
-- Enums support positional/named payloads, recursion through automatic `Box`, and interface fields; enums in FFI, explicit discriminants, and methods on enums are not implemented.
+- Enums support positional/named payloads, recursion through automatic `Box`, interface fields, and `type A = B | C` unions; enums in FFI, explicit discriminants, and methods on enums are not implemented.
+- Unions require named interface/enum/union members; primitive/array/Option members, inline union types, alias declarations, and discriminant narrowing are not implemented.
 - The [local notes service](examples/notes-service/README.md) defines DTOs, synchronous handlers, static routes and SQL in Lift. The [database API](stdlib/lift_db/README.md) provides configurable SQLite/PostgreSQL pools, parameterized execute/query, materialized rows and owned transactions. The server owns the pool and handlers borrow it.
 
 The service exercises the documented SQL/scalar and static HTTP contracts. See the [database compatibility plan](docs/database-compatibility.md) for the backend/version matrix and the [callback/HTTP contract](docs/callbacks-and-web-contract.md) for adapter limits.
@@ -332,6 +358,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/enums.lift` — nominal enums with positional payloads, exhaustive variant match, equality, and arrays of enums.
 - `examples/enum-fields.lift` — named-field payloads, object-literal construction, and field-order matching.
 - `examples/recursive-enums.lift` — recursive enums with `Box` indirection, interface fields, and recursive matching.
+- `examples/unions.lift` — `type A = B | C` unions, object-literal construction, exhaustive matching, enum members, and recursion.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

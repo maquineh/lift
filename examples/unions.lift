@@ -1,0 +1,48 @@
+// EN: `type A = B | C` unions desugared to nominal enums.
+// PT-BR: uniões `type A = B | C` desaçucaradas para enums nominais.
+interface Circle { radius: number }
+interface Square { side: number }
+type Shape = Circle | Square;
+
+function area(shape: Shape): number {
+    match shape {
+        Shape.Circle(circle) => { return 3.14 * circle.radius * circle.radius; }
+        Shape.Square(square) => { return square.side * square.side; }
+    }
+}
+
+const shapes: Shape[] = [
+    Shape.Circle({ radius: 2.0 }),
+    Shape.Square({ side: 3.0 }),
+];
+for (const shape of shapes) {
+    console.log(area(shape));
+}
+console.log(shapes[0] == Shape.Circle({ radius: 2.0 }));
+console.log(shapes[0] == Shape.Square({ side: 2.0 }));
+
+enum Direction { North, South }
+interface Other { label: string }
+type Either = Direction | Other;
+
+function text(value: Either): string {
+    match value {
+        Either.Direction(direction) => {
+            match direction {
+                Direction.North => { return "north"; }
+                Direction.South => { return "south"; }
+            }
+        }
+        Either.Other(other) => { return other.label; }
+    }
+}
+
+console.log(text(Either.Direction(Direction.North)));
+console.log(text(Either.Other({ label: "other" })));
+
+interface TreeNode { value: int, children: Tree[] }
+type Tree = TreeNode;
+const leaf: Tree = Tree.TreeNode({ value: 1, children: [] });
+match leaf {
+    Tree.TreeNode(node) => { console.log(node.value); }
+}

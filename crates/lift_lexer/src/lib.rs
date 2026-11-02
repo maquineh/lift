@@ -119,6 +119,8 @@ pub enum Token {
     From,
     #[token("interface")]
     Interface,
+    #[token("type")]
+    Type,
     #[token("enum")]
     Enum,
     #[token("const")]
@@ -194,6 +196,8 @@ pub enum Token {
     AndAnd,
     #[token("||")]
     OrOr,
+    #[token("|")]
+    Pipe,
     #[token("??")]
     Nullish,
 

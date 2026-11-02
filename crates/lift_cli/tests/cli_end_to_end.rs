@@ -615,6 +615,36 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
 }
 
 #[test]
+fn unions_example_runs_type_unions_and_matching() {
+    let directory = TempDir::new("unions");
+    let source = directory.path().join("unions.lift");
+    fs::write(&source, include_str!("../../../examples/unions.lift")).unwrap();
+    let expected = "12.56\n9\ntrue\nfalse\nnorth\nother\n1\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("unions {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("unions"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário unions");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn recursive_enums_example_runs_boxes_and_interface_fields() {
     let directory = TempDir::new("recursive-enums");
     let source = directory.path().join("recursive-enums.lift");

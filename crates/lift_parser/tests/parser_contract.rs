@@ -221,6 +221,43 @@ fn parses_enum_declarations_and_qualified_match_patterns() {
 }
 
 #[test]
+fn parses_union_type_declarations() {
+    let source = r#"
+        interface Circle { radius: number }
+        interface Square { side: number }
+        type Shape = Circle | Square;
+        const shapes: Shape[] = [Shape.Circle({ radius: 2.0 })];
+    "#;
+    let program = parse_source(source).expect("união válida");
+    let Declaration::Union(union) = &program.declarations[2] else {
+        panic!("union")
+    };
+    assert_eq!(union.name.name, "Shape");
+    assert_eq!(union.members.len(), 2);
+    let lift_ast::TypeExpressionKind::Named(first) = &union.members[0].kind else {
+        panic!("member")
+    };
+    assert_eq!(first.name, "Circle");
+    let lift_ast::TypeExpressionKind::Named(second) = &union.members[1].kind else {
+        panic!("member")
+    };
+    assert_eq!(second.name, "Square");
+    parse_source("type Single = Circle;").unwrap();
+
+    for rejected in [
+        "type = Circle;",
+        "type Shape = ;",
+        "type Shape = Circle | ;",
+        "type Shape = Circle",
+        "type Shape = Circle[] | Square;",
+        "type Shape = (int) => int | Circle;",
+        "type Shape = Circle |",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
 fn parses_enum_named_fields_and_object_payloads() {
     let source = r#"
         enum Shape {

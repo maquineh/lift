@@ -135,7 +135,7 @@ fn ffi_rejects_nested_options_local_structs_and_invalid_layout_fields() {
         r#"import interface R { value: DbPool } from "sample@1.0.0::R";"#,
         r#"import interface R { value?: int? } from "sample@1.0.0::R";"#,
         r#"import interface R { value: int[][] } from "sample@1.0.0::R";"#,
-        r#"import interface R { type: int } from "sample@1.0.0::R";"#,
+        r#"import interface R { fn: int } from "sample@1.0.0::R";"#,
         r#"import interface R { x: int } from "no-path";"#,
         r#"import interface R { x: int } from "sample::R";"#,
         r#"import interface R { x: int } from "sample@1.0.0::R"; interface R { x: int }"#,
