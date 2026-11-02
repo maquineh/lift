@@ -14,3 +14,15 @@ console.log(counter());
 console.log(counter());
 const other = makeCounter();
 console.log(other());
+
+function makeGreeter(): () => string {
+    let text = "hello";
+    return (): string => {
+        text = text + "!";
+        return text;
+    };
+}
+
+const greeter = makeGreeter();
+console.log(greeter());
+console.log(greeter());

@@ -22,7 +22,7 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 11. **Recursão e enums em interfaces** — payloads recursivos com `Box` automático, enums mutuamente recursivos, ciclos struct↔enum e campos de enum em interfaces.
 12. **Uniões nominais `type A = B | C`** — membros nominais desaçucarados para um enum, construção por `Shape.Circle(...)`, match exaustivo, membros enum e recursão.
 13. **Funções genéricas** — `function f<T>(...)` com inferência por argumento, `T[]`/`T?`/`Result<T, E>`, chamadas genéricas aninhadas e bounds Rust `Clone + Debug + PartialEq`.
-14. **Captures mutáveis/FnMut** — closures mutam captures `Copy` via `Rc<RefCell<T>>`, com estado persistente e independente por closure; mutações ficam no snapshot interno e captures não-Copy mutáveis são rejeitadas.
+14. **Captures mutáveis/FnMut** — closures mutam captures por atribuição inteira via `Rc<RefCell<T>>`, com estado persistente e independente por closure; mutações ficam no snapshot interno e mutação de campo/índice/método em captures e compartilhamento com a variável externa ficam de fora.
 
 ## Contratos e limites atuais
 
@@ -54,7 +54,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - `examples/recursive-enums.lift` → `6 / 3 / true`
   - `examples/unions.lift` → `12.56 / 9 / true / false / north / other / 1`
   - `examples/generics.lift` → `42 / hi / true / 1 / true / false / 7 / 1 / 9 / 5 / 4`
-  - `examples/fnmut.lift` → `1 / 2 / 3 / 1`
+  - `examples/fnmut.lift` → `1 / 2 / 3 / 1 / hello! / hello!!`
   - `examples/errors.lift` e `examples/higher-order.lift` também cobertos por E2E.
 - `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift` e `examples/recursive-enums.lift` e `examples/unions.lift` e `examples/generics.lift` e `examples/fnmut.lift`: sem avisos.
 - Skips conhecidos e **pré-existentes** (não causados por estes incrementos): testes de banco cuja cadeia de dependências (`r2d2`/`scheduled-thread-pool`) pede rustc mais novo que o MSRV 1.94.1. Eles permanecem documentados na matriz de testes e devem ser reavaliados quando a dependência for atualizada.
