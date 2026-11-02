@@ -401,6 +401,8 @@ pub struct HirVariableDeclaration {
     /// `const` pode precisar virar `let mut` no Rust para mutar uma projeção;
     /// a semântica Lift continua proibindo rebinding do binding `const`.
     pub requires_mut_binding: bool,
+    /// Variável local compartilhada com closures mutáveis via `Rc<RefCell<T>>`.
+    pub captured_mutably: bool,
     pub span: Span,
 }
 

@@ -298,6 +298,7 @@ struct Analyzer<'ast> {
     next_try_id: u32,
     next_loop_id: u32,
     mutable_bindings: HashSet<BindingId>,
+    shared_capture_sources: HashSet<BindingId>,
 }
 
 /// Constrói HIR tipado. Um `Ok` nunca contém tipo desconhecido nem recurso
@@ -354,6 +355,7 @@ impl<'ast> Analyzer<'ast> {
             next_try_id: 0,
             next_loop_id: 0,
             mutable_bindings: HashSet::new(),
+            shared_capture_sources: HashSet::new(),
         }
     }
 
@@ -1897,6 +1899,7 @@ impl<'a> BodyChecker<'a> {
                     ty,
                     initializer,
                     requires_mut_binding: false,
+                    captured_mutably: false,
                     span: variable.span,
                 }))
             }
