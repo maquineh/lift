@@ -167,6 +167,8 @@ pub struct EnumNamedField {
 #[derive(Clone, Debug, PartialEq)]
 pub struct InterfaceDeclaration {
     pub name: Identifier,
+    /// Parâmetros de tipo de um container genérico (`interface Box<T>`).
+    pub type_parameters: Vec<Identifier>,
     pub fields: Vec<InterfaceField>,
     pub span: Span,
 }
@@ -214,6 +216,11 @@ pub struct TypeExpression {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypeExpressionKind {
     Named(Identifier),
+    /// Aplicação de tipo genérico (`Box<int>`, `Map<string, int>`).
+    Generic {
+        name: Identifier,
+        arguments: Vec<TypeExpression>,
+    },
     Array(Box<TypeExpression>),
     /// Builtin Result type; PT-BR: tipo Result embutido, sem generics gerais.
     Result(Box<TypeExpression>, Box<TypeExpression>),

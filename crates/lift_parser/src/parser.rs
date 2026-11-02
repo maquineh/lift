@@ -193,10 +193,21 @@ impl<'tokens> Parser<'tokens> {
     fn parse_interface_declaration(&mut self) -> Result<InterfaceDeclaration, ParseError> {
         let start = self.expect(is_interface, "`interface`")?.start;
         let name = self.parse_identifier()?;
+        let mut type_parameters = Vec::new();
+        if self.consume(|token| matches!(token, Token::Less)).is_some() {
+            loop {
+                type_parameters.push(self.parse_identifier()?);
+                if self.consume(is_comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(|token| matches!(token, Token::Greater), "`>`")?;
+        }
         self.expect(is_left_brace, "`{`")?;
         let (fields, close) = self.parse_interface_fields()?;
         Ok(InterfaceDeclaration {
             name,
+            type_parameters,
             fields,
             span: self.span(start, close),
         })
@@ -533,6 +544,28 @@ impl<'tokens> Parser<'tokens> {
         }
 
         let identifier = Identifier { name, span };
+        if self.consume(|token| matches!(token, Token::Less)).is_some() {
+            let mut arguments = Vec::new();
+            if self.check(|token| matches!(token, Token::Greater)) {
+                return Err(self.error("ao menos um argumento de tipo"));
+            }
+            if !self.check(|token| matches!(token, Token::Greater)) {
+                loop {
+                    arguments.push(self.parse_type()?);
+                    if self.consume(is_comma).is_none() {
+                        break;
+                    }
+                }
+            }
+            let close = self.expect(|token| matches!(token, Token::Greater), "`>`")?;
+            return Ok(TypeExpression {
+                kind: TypeExpressionKind::Generic {
+                    name: identifier,
+                    arguments,
+                },
+                span: self.span(span.start, close.end),
+            });
+        }
         Ok(TypeExpression {
             kind: TypeExpressionKind::Named(identifier),
             span,

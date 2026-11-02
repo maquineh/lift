@@ -44,7 +44,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 ```
 
 - Formatação: limpa.
-- Testes: **243 passando**, **39 suítes**, 0 falhas.
+- Testes: **244 passando**, **39 suítes**, 0 falhas.
 - E2E por `check`, `build`, `run` e binário nativo dos exemplos:
   - `examples/loops.lift` → `6 1 2 3 7 8 1 3 4 5 10 20`
   - `examples/array-methods.lift` → `2 8 1 2 4 3 true true 1 2 3 4 10 #3 20 200`
@@ -81,6 +81,6 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 
 ## Próximos passos sugeridos
 
-1. **Containers genéricos** — estender genéricos para interfaces/structs/enums e argumentos de tipo explícitos; funções genéricas já concluídas.
+1. **Containers genéricos** — parser pronto; falta instanciar/monomorfizar `Box<T>`/`Map<K,V>` no sema e no codegen.
 2. **Captures mutáveis/`FnMut`** — concluído para locais `Copy` compartilhados; captures não-`Copy` continuam snapshots isolados.
 3. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.

@@ -221,6 +221,58 @@ fn parses_enum_declarations_and_qualified_match_patterns() {
 }
 
 #[test]
+fn parses_generic_interface_declarations_and_type_applications() {
+    let source = r#"
+        interface Box<T> { value: T }
+        interface Map<K, V> { keys: K[] }
+        const value: Box<int> = { value: 1 };
+        function get(box: Box<string>): Box<string> { return box; }
+    "#;
+    let program = parse_source(source).expect("containers genéricos");
+    let Declaration::Interface(boxed) = &program.declarations[0] else {
+        panic!("Box")
+    };
+    assert_eq!(boxed.name.name, "Box");
+    assert_eq!(boxed.type_parameters.len(), 1);
+    assert_eq!(boxed.type_parameters[0].name, "T");
+    let Declaration::Interface(map) = &program.declarations[1] else {
+        panic!("Map")
+    };
+    assert_eq!(
+        map.type_parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["K", "V"]
+    );
+    let Declaration::Statement(Statement::Variable(variable)) = &program.declarations[2] else {
+        panic!("variable")
+    };
+    let lift_ast::TypeExpressionKind::Generic { name, arguments } =
+        &variable.annotation.as_ref().unwrap().kind
+    else {
+        panic!("generic type")
+    };
+    assert_eq!(name.name, "Box");
+    assert_eq!(arguments.len(), 1);
+    let Declaration::Function(function) = &program.declarations[3] else {
+        panic!("function")
+    };
+    assert!(matches!(
+        function.parameters[0].ty.kind,
+        lift_ast::TypeExpressionKind::Generic { .. }
+    ));
+
+    for rejected in [
+        "interface Box<T> { value: T } const value: Box<> = { value: 1 };",
+        "interface Box<T> { value: T } const value: Box<int = { value: 1 };",
+        "interface Box<T,> { value: T }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
 fn parses_generic_function_type_parameters() {
     let source = r#"
         function identity<T>(value: T): T { return value; }
@@ -652,7 +704,6 @@ fn result_requires_exactly_two_type_arguments() {
         "Result<>",
         "Result<int>",
         "Result<int, string, boolean>",
-        "Box<int>",
     ] {
         assert!(
             parse_source(&format!("function f(value: {ty}): void {{}}")).is_err(),

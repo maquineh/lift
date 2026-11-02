@@ -4882,6 +4882,24 @@ fn resolve_type(
     position: TypePosition,
 ) -> Result<ResolvedType, SemaError> {
     let resolved = match &expression.kind {
+        TypeExpressionKind::Generic { name, arguments } => {
+            for argument in arguments {
+                let _ = resolve_type(
+                    argument,
+                    known_structs,
+                    type_parameters,
+                    TypePosition::Field,
+                )?;
+            }
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                format!(
+                    "container genérico `{}` ainda não tem instanciação semântica",
+                    name.name
+                ),
+                expression.span,
+            ));
+        }
         TypeExpressionKind::Named(name) if type_parameters.contains(&name.name) => {
             ResolvedType::TypeParam(name.name.clone())
         }
