@@ -26,3 +26,10 @@ function makeGreeter(): () => string {
 const greeter = makeGreeter();
 console.log(greeter());
 console.log(greeter());
+let shared = 0;
+const bump = (): void => { shared = shared + 1; };
+const current = (): int => shared;
+bump();
+bump();
+console.log(shared);
+console.log(current());

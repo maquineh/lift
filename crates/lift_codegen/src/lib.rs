@@ -689,10 +689,18 @@ impl Emitter {
                     ""
                 };
                 let initializer = self.expression(&variable.initializer);
-                self.line(format!(
-                    "let {mutability}{} = {initializer};",
-                    binding_name(variable.id)
-                ));
+                if variable.captured_mutably {
+                    let cell = format!("{}_cell", binding_name(variable.id));
+                    self.line(format!(
+                        "let {cell} = ::std::rc::Rc::new(::std::cell::RefCell::new({initializer}));"
+                    ));
+                    self.capture_cells.insert(variable.id, cell);
+                } else {
+                    self.line(format!(
+                        "let {mutability}{} = {initializer};",
+                        binding_name(variable.id)
+                    ));
+                }
             }
             HirStatement::Assignment(assignment) => {
                 let value = self.expression(&assignment.value);
@@ -975,6 +983,16 @@ impl Emitter {
                 let previous_cells = self.capture_cells.clone();
                 let mut statements = Vec::new();
                 for (id, value) in captures {
+                    if let HirExprKind::Local { id: source, .. } = &value.kind {
+                        if let Some(cell) = self.capture_cells.get(source).cloned() {
+                            statements.push(format!(
+                                "let {} = {cell}.clone();",
+                                binding_name(*id)
+                            ));
+                            self.capture_cells.insert(*id, binding_name(*id));
+                            continue;
+                        }
+                    }
                     let value = self.expression(value);
                     if mutable_captures.contains(id) {
                         let cell = self.temp_name();

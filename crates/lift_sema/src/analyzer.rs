@@ -1892,6 +1892,7 @@ impl<'a> BodyChecker<'a> {
                         span: variable.name.span,
                     },
                 )?;
+                let share_cell = variable.binding == lift_ast::BindingKind::Let && ty.is_copy();
                 Ok(HirStatement::Variable(HirVariableDeclaration {
                     id,
                     binding: variable.binding,
@@ -1899,7 +1900,7 @@ impl<'a> BodyChecker<'a> {
                     ty,
                     initializer,
                     requires_mut_binding: false,
-                    captured_mutably: false,
+                    captured_mutably: share_cell,
                     span: variable.span,
                 }))
             }

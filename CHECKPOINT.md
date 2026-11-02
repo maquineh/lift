@@ -2,7 +2,7 @@
 
 - **Data:** 2026-11-02 (America/Manaus)
 - **Branch:** `main`
-- **Último commit antes deste checkpoint:** `7fee193 feat: add inferred generic functions`
+- **Último commit antes deste checkpoint:** `550c0f9 test: cover non-copy mutable captures`
 - **Estado:** incrementos abaixo implementados, testados, documentados e reunidos neste checkpoint. O working tree fica limpo após o commit; `target/` e `.lift_cache/` são ignorados.
 
 Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR tipado → Rust → binário). Ele complementa a matriz de testes e os contratos em `docs/`; não substitui essas fontes.
@@ -54,7 +54,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - `examples/recursive-enums.lift` → `6 / 3 / true`
   - `examples/unions.lift` → `12.56 / 9 / true / false / north / other / 1`
   - `examples/generics.lift` → `42 / hi / true / 1 / true / false / 7 / 1 / 9 / 5 / 4`
-  - `examples/fnmut.lift` → `1 / 2 / 3 / 1 / hello! / hello!!`
+  - `examples/fnmut.lift` → `1 / 2 / 3 / 1 / hello! / hello!! / 2 / 2`
   - `examples/errors.lift` e `examples/higher-order.lift` também cobertos por E2E.
 - `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift` e `examples/recursive-enums.lift` e `examples/unions.lift` e `examples/generics.lift` e `examples/fnmut.lift`: sem avisos.
 - Skips conhecidos e **pré-existentes** (não causados por estes incrementos): testes de banco cuja cadeia de dependências (`r2d2`/`scheduled-thread-pool`) pede rustc mais novo que o MSRV 1.94.1. Eles permanecem documentados na matriz de testes e devem ser reavaliados quando a dependência for atualizada.
@@ -82,5 +82,5 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 ## Próximos passos sugeridos
 
 1. **Containers genéricos** — estender genéricos para interfaces/structs/enums e argumentos de tipo explícitos; funções genéricas já concluídas.
-2. **Captures mutáveis/`FnMut`** — concluído (snapshots internos via `Rc<RefCell<T>>`); falta compartilhar estado com a variável externa/closures aninhadas.
+2. **Captures mutáveis/`FnMut`** — concluído para locais `Copy` compartilhados; captures não-`Copy` continuam snapshots isolados.
 3. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.

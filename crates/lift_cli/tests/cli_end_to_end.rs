@@ -619,7 +619,7 @@ fn fnmut_example_runs_mutable_closure_state() {
     let directory = TempDir::new("fnmut");
     let source = directory.path().join("fnmut.lift");
     fs::write(&source, include_str!("../../../examples/fnmut.lift")).unwrap();
-    let expected = "1\n2\n3\n1\nhello!\nhello!!\n";
+    let expected = "1\n2\n3\n1\nhello!\nhello!!\n2\n2\n";
     let output = cli().arg("run").arg(&source).output().unwrap();
     assert_success(&output, "fnmut run");
     assert!(

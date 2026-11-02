@@ -23,7 +23,7 @@ console.log(other());   // 1
 ## Semantics and limits
 
 - Assignments to captured variables are allowed; the snapshot is initialized when the closure is created and persists inside the closure (including across `Rc` clones).
-- Mutations do **not** update the original outer variable: captures remain snapshots. Accumulate outside state through the closure's return value, `reduce`, or explicit `for...of`.
+- `let` locals of `Copy` types are stored in a shared `Rc<RefCell<T>>`; mutations are visible to the outer variable and to every closure that captured it. Non-`Copy` captures remain isolated snapshots (mutations do not escape).
 - Multiple closures over the same variable get independent snapshots; two counters are independent.
 - The closure still implements `Fn`; mutation uses interior mutability (`Rc<RefCell<T>>`), so array methods and callbacks need no signature changes.
 - Nested closures capture a read snapshot of an outer mutable capture; sharing one cell across nested closures is not supported.
