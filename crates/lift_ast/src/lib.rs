@@ -142,6 +142,15 @@ pub struct EnumDeclaration {
 pub struct EnumVariant {
     pub name: Identifier,
     pub fields: Vec<TypeExpression>,
+    /// Payload com campos nomeados; mutuamente exclusivo com `fields`.
+    pub named_fields: Vec<EnumNamedField>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumNamedField {
+    pub name: Identifier,
+    pub ty: TypeExpression,
     pub span: Span,
 }
 

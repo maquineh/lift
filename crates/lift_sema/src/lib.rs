@@ -226,6 +226,14 @@ pub struct HirEnum {
 pub struct HirEnumVariant {
     pub name: String,
     pub fields: Vec<ResolvedType>,
+    pub named_fields: Vec<HirEnumNamedField>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirEnumNamedField {
+    pub name: String,
+    pub ty: ResolvedType,
     pub span: Span,
 }
 
@@ -439,11 +447,12 @@ pub enum HirMatchPattern {
     /// `None` representa `ok()` para sucesso `void`.
     Ok(Option<HirMatchBinding>),
     Err(HirMatchBinding),
-    /// `Enum.Variant(binding, ...)`; bindings posicionais, um por campo.
+    /// `Enum.Variant(binding, ...)`; `named` indica payload por campos.
     EnumVariant {
         enum_name: String,
         variant: String,
         bindings: Vec<HirMatchBinding>,
+        named: bool,
     },
 }
 
@@ -536,11 +545,12 @@ pub enum HirExprKind {
         callback: Box<HirExpr>,
         initial: Option<Box<HirExpr>>,
     },
-    /// `Enum.Variant(arg, ...)` ou `Enum.Variant` sem payload.
+    /// `Enum.Variant(arg, ...)`, `Enum.Variant { campo: valor }` ou unit.
     EnumConstruct {
         enum_name: String,
         variant: String,
         fields: Vec<HirExpr>,
+        named_fields: Vec<HirStructInitField>,
     },
     IntegerLiteral(i64),
     NumberLiteral(f64),

@@ -14,13 +14,13 @@ use lift_ast::{
 use crate::{
     ArgPassMode, ArrayMethodKind, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode,
     HirAssignment, HirBlock, HirBreak, HirCallArgument, HirContinue, HirDeclaration, HirElseBranch,
-    HirEnum, HirEnumVariant, HirExpr, HirExprKind, HirExpressionStatement, HirExternStruct,
-    HirForOf, HirFunction, HirIf, HirImport, HirMatch, HirMatchArm, HirMatchBinding,
-    HirMatchPattern, HirNarrowing, HirParameter, HirProgram, HirReturn, HirStatement, HirStruct,
-    HirStructField, HirStructInitField, HirThrow, HirTryCatch, HirVariableDeclaration, HirWhile,
-    LoopId, ParameterPassMode, PropagateTarget, ResolvedType, RustDependency, SemaError,
-    SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN, OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN,
-    RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
+    HirEnum, HirEnumNamedField, HirEnumVariant, HirExpr, HirExprKind, HirExpressionStatement,
+    HirExternStruct, HirForOf, HirFunction, HirIf, HirImport, HirMatch, HirMatchArm,
+    HirMatchBinding, HirMatchPattern, HirNarrowing, HirParameter, HirProgram, HirReturn,
+    HirStatement, HirStruct, HirStructField, HirStructInitField, HirThrow, HirTryCatch,
+    HirVariableDeclaration, HirWhile, LoopId, ParameterPassMode, PropagateTarget, ResolvedType,
+    RustDependency, SemaError, SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN, OPTION_IS_SOME_BUILTIN,
+    OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
 };
 
 fn method_name(target: &str, method: &str) -> String {
@@ -225,6 +225,7 @@ struct EnumInfo {
 struct EnumVariantInfo {
     name: String,
     fields: Vec<ResolvedType>,
+    named_fields: Vec<HirEnumNamedField>,
     span: Span,
 }
 
@@ -658,9 +659,67 @@ impl<'ast> Analyzer<'ast> {
                         }
                     }
                 }
+                let mut named_fields = Vec::new();
+                let mut named_seen = HashMap::<String, Span>::new();
+                for field in &variant.named_fields {
+                    if let Some(previous) =
+                        named_seen.insert(field.name.name.clone(), field.name.span)
+                    {
+                        self.errors.push(
+                            SemaError::new(
+                                SemaErrorKind::DuplicateField,
+                                format!(
+                                    "campo `{}` duplicado na variante `{}`",
+                                    field.name.name, variant.name.name
+                                ),
+                                field.name.span,
+                            )
+                            .with_secondary(previous),
+                        );
+                        valid = false;
+                        continue;
+                    }
+                    match resolve_type(&field.ty, names, TypePosition::Field) {
+                        Ok(ty) => {
+                            if contains_enum(&ty, enum_names) {
+                                self.errors.push(SemaError::new(
+                                    SemaErrorKind::UnsupportedType,
+                                    "payload de enum não pode conter outro enum nesta fase",
+                                    field.ty.span,
+                                ));
+                                valid = false;
+                            } else if ty.needs_db_runtime() {
+                                self.errors.push(SemaError::new(
+                                    SemaErrorKind::UnsupportedType,
+                                    "payload de enum não pode usar DbValue nem recursos",
+                                    field.ty.span,
+                                ));
+                                valid = false;
+                            } else if !ty.is_value_type() {
+                                self.errors.push(SemaError::new(
+                                    SemaErrorKind::UnsupportedType,
+                                    "payload de enum exige tipo de valor",
+                                    field.ty.span,
+                                ));
+                                valid = false;
+                            } else {
+                                named_fields.push(HirEnumNamedField {
+                                    name: field.name.name.clone(),
+                                    ty,
+                                    span: field.span,
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            self.errors.push(error);
+                            valid = false;
+                        }
+                    }
+                }
                 variants.push(EnumVariantInfo {
                     name: variant.name.name.clone(),
                     fields,
+                    named_fields,
                     span: variant.span,
                 });
             }
@@ -680,6 +739,7 @@ impl<'ast> Analyzer<'ast> {
                             .map(|variant| HirEnumVariant {
                                 name: variant.name,
                                 fields: variant.fields,
+                                named_fields: variant.named_fields,
                                 span: variant.span,
                             })
                             .collect(),
@@ -2397,13 +2457,13 @@ impl<'a> BodyChecker<'a> {
                                         access.field.span,
                                     )
                                 })?;
-                            if !variant.fields.is_empty() {
+                            if !variant.fields.is_empty() || !variant.named_fields.is_empty() {
+                                let payloads = variant.fields.len() + variant.named_fields.len();
                                 return Err(SemaError::new(
                                     SemaErrorKind::ArgumentCountMismatch,
                                     format!(
-                                        "variante `{enum_name}.{}` exige {} payload(s); use `{enum_name}.{}(...)`",
+                                        "variante `{enum_name}.{}` exige {payloads} payload(s); use `{enum_name}.{}(...)` ou `{{ campo: valor }}`",
                                         access.field.name,
-                                        variant.fields.len(),
                                         access.field.name
                                     ),
                                     expression.span,
@@ -2415,6 +2475,7 @@ impl<'a> BodyChecker<'a> {
                                     enum_name,
                                     variant: access.field.name.clone(),
                                     fields: Vec::new(),
+                                    named_fields: Vec::new(),
                                 },
                                 ty,
                                 expression.span,
@@ -2887,12 +2948,21 @@ impl<'a> BodyChecker<'a> {
                         arm.pattern.span,
                     )
                 })?;
-            if binding_names.len() != variant.fields.len() {
+            let field_types: Vec<ResolvedType> = if variant.named_fields.is_empty() {
+                variant.fields.clone()
+            } else {
+                variant
+                    .named_fields
+                    .iter()
+                    .map(|field| field.ty.clone())
+                    .collect()
+            };
+            if binding_names.len() != field_types.len() {
                 return Err(SemaError::new(
                     SemaErrorKind::InvalidMatch,
                     format!(
                         "variante `{enum_name}.{variant_name}` espera {} binding(s), recebeu {}",
-                        variant.fields.len(),
+                        field_types.len(),
                         binding_names.len()
                     ),
                     arm.pattern.span,
@@ -2908,7 +2978,7 @@ impl<'a> BodyChecker<'a> {
             self.scopes.push(HashMap::new());
             let checked = (|| {
                 let mut bindings = Vec::new();
-                for (name, ty) in binding_names.iter().zip(&variant.fields) {
+                for (name, ty) in binding_names.iter().zip(field_types.iter()) {
                     let id = self.fresh_binding_id();
                     self.declare(
                         &name.name,
@@ -2944,6 +3014,7 @@ impl<'a> BodyChecker<'a> {
                     enum_name: enum_name.clone(),
                     variant: variant_name,
                     bindings,
+                    named: !variant.named_fields.is_empty(),
                 },
                 body,
                 span: arm.span,
@@ -2994,6 +3065,87 @@ impl<'a> BodyChecker<'a> {
                     call.callee.span,
                 )
             })?;
+        if !variant.named_fields.is_empty() {
+            if call.arguments.len() != 1 {
+                return Err(SemaError::new(
+                    SemaErrorKind::ArgumentCountMismatch,
+                    format!(
+                        "variante `{enum_name}.{variant_name}` espera um object literal com {} campo(s)",
+                        variant.named_fields.len()
+                    ),
+                    span,
+                ));
+            }
+            let argument = &call.arguments[0];
+            let lift_ast::ExpressionKind::ObjectLiteral(object) = &argument.kind else {
+                return Err(SemaError::new(
+                    SemaErrorKind::TypeMismatch,
+                    format!("variante `{enum_name}.{variant_name}` espera `{{ campo: valor }}`"),
+                    argument.span,
+                ));
+            };
+            let mut provided = HashMap::<String, &lift_ast::ObjectField>::new();
+            for field in &object.fields {
+                if let Some(previous) = provided.insert(field.name.name.clone(), field) {
+                    return Err(SemaError::new(
+                        SemaErrorKind::DuplicateObjectField,
+                        format!("campo `{}` aparece mais de uma vez", field.name.name),
+                        field.name.span,
+                    )
+                    .with_secondary(previous.name.span));
+                }
+                if !variant
+                    .named_fields
+                    .iter()
+                    .any(|declared| declared.name == field.name.name)
+                {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnexpectedObjectField,
+                        format!(
+                            "variante `{enum_name}.{variant_name}` não declara o campo `{}`",
+                            field.name.name
+                        ),
+                        field.name.span,
+                    ));
+                }
+            }
+            for declared in &variant.named_fields {
+                if !provided.contains_key(&declared.name) {
+                    return Err(SemaError::new(
+                        SemaErrorKind::MissingObjectField,
+                        format!(
+                            "payload de `{enum_name}.{variant_name}` não informa `{}`",
+                            declared.name
+                        ),
+                        span,
+                    ));
+                }
+            }
+            let mut named_fields = Vec::with_capacity(object.fields.len());
+            for field in &object.fields {
+                let declared = variant
+                    .named_fields
+                    .iter()
+                    .find(|declared| declared.name == field.name.name)
+                    .unwrap();
+                let value = self.check_expr(&field.value, &declared.ty)?;
+                named_fields.push(HirStructInitField {
+                    name: declared.name.clone(),
+                    value: self.materialize_owned(value, false),
+                    span: field.span,
+                });
+            }
+            return Ok(self.expr(
+                HirExprKind::EnumConstruct {
+                    enum_name: enum_name.to_owned(),
+                    variant: variant_name.to_owned(),
+                    fields: Vec::new(),
+                    named_fields,
+                },
+                ResolvedType::Struct(enum_name.to_owned()),
+                span,
+            ));
+        }
         if call.arguments.len() != variant.fields.len() {
             return Err(SemaError::new(
                 SemaErrorKind::ArgumentCountMismatch,
@@ -3015,6 +3167,7 @@ impl<'a> BodyChecker<'a> {
                 enum_name: enum_name.to_owned(),
                 variant: variant_name.to_owned(),
                 fields,
+                named_fields: Vec::new(),
             },
             ResolvedType::Struct(enum_name.to_owned()),
             span,
@@ -4672,9 +4825,16 @@ fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<Bin
                 collect_nested_mut_borrow_roots(initial, roots);
             }
         }
-        HirExprKind::EnumConstruct { fields, .. } => {
+        HirExprKind::EnumConstruct {
+            fields,
+            named_fields,
+            ..
+        } => {
             for field in fields {
                 collect_nested_mut_borrow_roots(field, roots);
+            }
+            for field in named_fields {
+                collect_nested_mut_borrow_roots(&field.value, roots);
             }
         }
         HirExprKind::FunctionValue { .. } => {}
@@ -4756,7 +4916,16 @@ fn hir_contains_call(expression: &HirExpr) -> bool {
                 || hir_contains_call(callback)
                 || initial.as_deref().is_some_and(hir_contains_call)
         }
-        HirExprKind::EnumConstruct { fields, .. } => fields.iter().any(hir_contains_call),
+        HirExprKind::EnumConstruct {
+            fields,
+            named_fields,
+            ..
+        } => {
+            fields.iter().any(hir_contains_call)
+                || named_fields
+                    .iter()
+                    .any(|field| hir_contains_call(&field.value))
+        }
         HirExprKind::FunctionValue { .. } => false,
         HirExprKind::OptionNone => false,
         HirExprKind::OptionSome(payload) => hir_contains_call(payload),
@@ -4818,9 +4987,16 @@ fn collect_hir_binding_uses(expression: &HirExpr, uses: &mut HashSet<BindingId>)
                 collect_hir_binding_uses(initial, uses);
             }
         }
-        HirExprKind::EnumConstruct { fields, .. } => {
+        HirExprKind::EnumConstruct {
+            fields,
+            named_fields,
+            ..
+        } => {
             for field in fields {
                 collect_hir_binding_uses(field, uses);
+            }
+            for field in named_fields {
+                collect_hir_binding_uses(&field.value, uses);
             }
         }
         HirExprKind::FunctionValue { .. } => {}

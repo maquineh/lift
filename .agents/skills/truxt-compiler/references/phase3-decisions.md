@@ -140,3 +140,18 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   dos campos; módulos flat compartilham os enums do pacote.
 - Testes: parser (declaração/patterns/rejeições), semântica (tipos, construtor,
   exaustividade, limites, igualdade, option flow), codegen e E2E check/build/run.
+### Variantes com campos nomeados
+
+- `EnumVariant` ganhou `named_fields: Vec<EnumNamedField>` no AST e
+  `HirEnumNamedField` no HIR; a variante é unit, posicional ou nomeada
+  (mutuamente exclusivo).
+- Construção nomeada usa exatamente um object literal `Enum.Variant({ campo: valor })`;
+  valida campos desconhecidos/ausentes/duplicados e tipos, preservando a ordem
+  da fonte nos valores avaliados.
+- Match de variante nomeada continua usando bindings posicionais na ordem de
+  declaração dos campos (`Shape.Circle(radius)`). O HIR marca `named: true` e o
+  codegen emite `Variant { campo: binding, ... }`.
+- Nomes de campo usam o mangle `__lift_field_*`; variantes nomeadas no Rust usam
+  `Variant { ... }`; igualdade/Clone/Debug continuam derivados.
+- Exemplo `examples/enum-fields.lift`, testes de parser/sema/codegen/E2E e docs
+  `docs/enums*.md`.

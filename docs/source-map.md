@@ -80,7 +80,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `crates/lift_sema/tests/liveness_contract.rs` | Last-use eligibility and conservative counterexamples at joins, returns, loops, reassignment, calls, borrowed parameters, and projections. |
 | `crates/lift_sema/tests/option_contract.rs` | Optional/null typing, explicit lazy coalescing modes, required versus omittable optional fields, flow narrowing (branches, guards, else-if, loops, captures, rejected mutations), inference limits, cycles, FFI nesting/local-struct rejection, and conservative ownership. |
 | `crates/lift_sema/tests/ffi_structs_options_contract.rs` | External layout resolution and dependencies, field/type validation, struct/Option/Result FFI acceptance and rejection, and borrowed parameter modes. |
-| `crates/lift_sema/tests/enum_contract.rs` | Enum declaration/typing, positional payload construction, qualified exhaustive match, limits (fields/FFI/nesting/DbValue), equality, option payloads, and clone semantics. |
+| `crates/lift_sema/tests/enum_contract.rs` | Enum declaration/typing, positional and named-field payload construction, qualified exhaustive match, limits (fields/FFI/nesting/DbValue), equality, option payloads, and clone semantics. |
 | `crates/lift_sema/tests/match_contract.rs` | `match` typing for Option/Result/void, exhaustiveness, duplicate/incompatible patterns, clone semantics, payload mutation, return guarantees, loop control, and throw in arms. |
 | `crates/lift_sema/tests/array_methods_contract.rs` | `map`/`filter`/`find`/`some`/`every`/`forEach`/`reduce` typing, receiver clones, chaining, named callbacks/captures, value semantics, and rejected callbacks/receivers. |
 | `crates/lift_sema/tests/loops_contract.rs` | `for...of` typing/scope/snapshot, `while` labels, nested `break`/`continue` targets, `try`/`catch` interaction, missing-return analysis, mutation rules, and resource-consumption rejection. |
@@ -97,6 +97,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `examples/registry.lift` | Consume `num-integer` 0.1.46 from the registry and print a GCD. |
 | `examples/liveness.lift` | Exercise clone/move decisions across control flow and verify observable outputs with rustc. |
 | `examples/option.lift` | Counters proving exactly-once/lazy fallbacks, optional arrays and fields (omitted and explicit), flow narrowing across guards and loops, and retained sources. |
+| `examples/enum-fields.lift` | Named-field variants, object-literal construction, positional binding by field order, and value/equality semantics. |
 | `examples/enums.lift` | Nominal enums with payloads, exhaustive variant match, equality, and arrays of enums. |
 | `examples/match.lift` | Exhaustive Option/Result match, `ok()` for void, payload snapshots, and loop control inside arms. |
 | `examples/array-methods.lift` | Higher-order array methods, chaining, callback captures, and struct/string results. |

@@ -93,6 +93,7 @@ fn enums_construct_match_and_compare_payloads() {
         enum_name,
         variant,
         bindings,
+        ..
     } = &match_.arms[0].pattern
     else {
         panic!("enum pattern")
@@ -283,4 +284,110 @@ fn enum_payloads_preserve_option_flow_and_value_semantics() {
             ..
         }
     ));
+}
+
+#[test]
+fn enum_named_fields_construct_and_match_in_field_order() {
+    let program = lower(
+        r#"
+        enum Shape {
+            Circle { radius: number },
+            Rect { width: number, height: number },
+            Empty,
+        }
+        function area(shape: Shape): number {
+            match shape {
+                Shape.Circle(radius) => { return radius; }
+                Shape.Rect(width, height) => { return width * height; }
+                Shape.Empty => { return 0.0; }
+            }
+        }
+        const value = Shape.Circle({ radius: 2.0 });
+        "#,
+    )
+    .unwrap();
+    let shape = enum_decl(&program, "Shape");
+    assert!(shape.variants[0].fields.is_empty());
+    assert_eq!(shape.variants[0].named_fields.len(), 1);
+    assert_eq!(shape.variants[0].named_fields[0].name, "radius");
+    assert_eq!(shape.variants[0].named_fields[0].ty, ResolvedType::Number);
+    let area = function(&program, "area");
+    let HirStatement::Match(match_) = &area.body.statements[0] else {
+        panic!("match")
+    };
+    let HirMatchPattern::EnumVariant {
+        named, bindings, ..
+    } = &match_.arms[0].pattern
+    else {
+        panic!("pattern")
+    };
+    assert!(named);
+    assert_eq!(bindings.len(), 1);
+    let value = program
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            HirDeclaration::Statement(HirStatement::Variable(variable))
+                if variable.name == "value" =>
+            {
+                Some(variable)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let HirExprKind::EnumConstruct { named_fields, .. } = &value.initializer.kind else {
+        panic!("constructor")
+    };
+    assert_eq!(named_fields.len(), 1);
+    assert_eq!(named_fields[0].name, "radius");
+}
+
+#[test]
+fn enum_named_fields_reject_invalid_object_payloads() {
+    let cases: &[(&str, SemaErrorKind, &str)] = &[
+        (
+            "enum Shape { Circle { radius: number } } const v = Shape.Circle({ radius: \"x\" });",
+            SemaErrorKind::TypeMismatch,
+            "number",
+        ),
+        (
+            "enum Shape { Circle { radius: number } } const v = Shape.Circle({ });",
+            SemaErrorKind::MissingObjectField,
+            "radius",
+        ),
+        (
+            "enum Shape { Circle { radius: number } } const v = Shape.Circle({ radius: 1.0, extra: 2.0 });",
+            SemaErrorKind::UnexpectedObjectField,
+            "extra",
+        ),
+        (
+            "enum Shape { Circle { radius: number } } const v = Shape.Circle({ radius: 1.0, radius: 2.0 });",
+            SemaErrorKind::DuplicateObjectField,
+            "radius",
+        ),
+        (
+            "enum Shape { Circle { radius: number } } const v = Shape.Circle(2.0);",
+            SemaErrorKind::TypeMismatch,
+            "campo: valor",
+        ),
+        (
+            "enum Shape { Circle { radius: number } } const v = Shape.Circle;",
+            SemaErrorKind::ArgumentCountMismatch,
+            "payload",
+        ),
+        (
+            "enum Shape { Circle { radius: number } } function f(s: Shape): int { match s { Shape.Circle() => { return 1; } } }",
+            SemaErrorKind::InvalidMatch,
+            "binding",
+        ),
+    ];
+    for (source, kind, message) in cases {
+        let errors = lower(source).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.kind == *kind && error.message.contains(message)),
+            "expected {kind:?}/{message} in {errors:?}"
+        );
+    }
 }

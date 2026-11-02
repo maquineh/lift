@@ -175,7 +175,16 @@ fn expr_uses_console(expression: &HirExpr) -> bool {
                 || expr_uses_console(callback)
                 || initial.as_deref().is_some_and(expr_uses_console)
         }
-        HirExprKind::EnumConstruct { fields, .. } => fields.iter().any(expr_uses_console),
+        HirExprKind::EnumConstruct {
+            fields,
+            named_fields,
+            ..
+        } => {
+            fields.iter().any(expr_uses_console)
+                || named_fields
+                    .iter()
+                    .any(|field| expr_uses_console(&field.value))
+        }
         HirExprKind::FunctionValue { .. } => false,
         HirExprKind::OptionNone => false,
         HirExprKind::OptionSome(payload) => expr_uses_console(payload),
@@ -250,6 +259,7 @@ struct Emitter {
     indent: usize,
     function_names: HashMap<String, String>,
     struct_names: HashMap<String, String>,
+    enum_named_fields: HashMap<(String, String), Vec<String>>,
     /// Nomes Lift de tipos externos: campos usam o nome Rust, sem mangle.
     extern_structs: HashSet<String>,
     parameter_modes: HashMap<BindingId, ParameterPassMode>,
@@ -295,6 +305,28 @@ impl Emitter {
                 _ => None,
             })
             .collect();
+        let enum_named_fields = program
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                HirDeclaration::Enum(enumeration) => Some(enumeration),
+                _ => None,
+            })
+            .flat_map(|enumeration| {
+                enumeration.variants.iter().filter_map(|variant| {
+                    (!variant.named_fields.is_empty()).then(|| {
+                        (
+                            (enumeration.name.clone(), variant.name.clone()),
+                            variant
+                                .named_fields
+                                .iter()
+                                .map(|field| field.name.clone())
+                                .collect(),
+                        )
+                    })
+                })
+            })
+            .collect();
 
         Self {
             output: String::from(
@@ -303,6 +335,7 @@ impl Emitter {
             indent: 0,
             function_names,
             struct_names,
+            enum_named_fields,
             extern_structs,
             parameter_modes: HashMap::new(),
             next_temp_name: 0,
@@ -334,6 +367,22 @@ impl Emitter {
                     self.line(format!("enum {} {{", self.type_name(&enumeration.name)));
                     self.indent += 1;
                     for variant in &enumeration.variants {
+                        if !variant.named_fields.is_empty() {
+                            let fields = variant
+                                .named_fields
+                                .iter()
+                                .map(|field| {
+                                    format!(
+                                        "{}: {}",
+                                        field_name(&field.name),
+                                        self.rust_type(&field.ty)
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            self.line(format!("{} {{ {fields} }},", variant_name(&variant.name)));
+                            continue;
+                        }
                         let fields = variant
                             .fields
                             .iter()
@@ -685,10 +734,32 @@ impl Emitter {
                             enum_name,
                             variant,
                             bindings,
+                            named,
                         } => {
                             let path =
                                 format!("{}::{}", self.type_name(enum_name), variant_name(variant));
-                            if bindings.is_empty() {
+                            if *named {
+                                let names = self
+                                    .enum_named_fields
+                                    .get(&(enum_name.clone(), variant.clone()))
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let fields = bindings
+                                    .iter()
+                                    .zip(names)
+                                    .map(|(binding, name)| {
+                                        let mutability =
+                                            if binding.requires_mut { "mut " } else { "" };
+                                        format!(
+                                            "{}: {mutability}{}",
+                                            field_name(&name),
+                                            binding_name(binding.id)
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!("{path} {{ {fields} }}")
+                            } else if bindings.is_empty() {
                                 path
                             } else {
                                 let bindings = bindings
@@ -856,13 +927,27 @@ impl Emitter {
                 enum_name,
                 variant,
                 fields,
+                named_fields,
             } => {
                 let path = format!(
                     "{}::{}",
                     self.type_name(enum_name),
                     variant_name(variant)
                 );
-                if fields.is_empty() {
+                if !named_fields.is_empty() {
+                    let fields = named_fields
+                        .iter()
+                        .map(|field| {
+                            format!(
+                                "{}: {}",
+                                field_name(&field.name),
+                                self.expression(&field.value)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{path} {{ {fields} }}")
+                } else if fields.is_empty() {
                     path
                 } else {
                     let fields = fields

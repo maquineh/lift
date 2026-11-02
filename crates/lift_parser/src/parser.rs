@@ -5,7 +5,7 @@
 use lift_ast::{
     ArrayLiteral, AssignmentStatement, BinaryExpression, BinaryOperator, BindingKind, Block,
     BreakStatement, CallExpression, ContinueStatement, Declaration, ElseBranch, ElseBranchKind,
-    EnumDeclaration, EnumVariant, Expression, ExpressionKind, ExpressionStatement,
+    EnumDeclaration, EnumNamedField, EnumVariant, Expression, ExpressionKind, ExpressionStatement,
     FieldAccessExpression, ForOfStatement, FunctionDeclaration, Identifier, IfStatement,
     ImportFunctionDeclaration, ImportInterfaceDeclaration, IndexExpression, InterfaceDeclaration,
     InterfaceField, MatchArm, MatchPattern, MatchPatternKind, MatchStatement,
@@ -199,7 +199,7 @@ impl<'tokens> Parser<'tokens> {
         })
     }
 
-    /// `enum Nome { Variante, Variante(Tipo, Tipo) }` com payloads posicionais.
+    /// `enum Nome { Variante, Variante(Tipo), Variante { campo: Tipo } }`.
     fn parse_enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {
         let start = self.expect(is_enum, "`enum`")?.start;
         let name = self.parse_identifier()?;
@@ -209,6 +209,7 @@ impl<'tokens> Parser<'tokens> {
             let variant_start = self.current_span().start;
             let variant_name = self.parse_identifier()?;
             let mut fields = Vec::new();
+            let mut named_fields = Vec::new();
             if self.consume(is_left_paren).is_some() {
                 if !self.check(is_right_paren) {
                     loop {
@@ -222,11 +223,34 @@ impl<'tokens> Parser<'tokens> {
                     }
                 }
                 self.expect(is_right_paren, "`)`")?;
+            } else if self.consume(is_left_brace).is_some() {
+                while !self.check(is_right_brace) && !self.is_at_end() {
+                    let field_start = self.current_span().start;
+                    let field_name = self.parse_identifier()?;
+                    self.expect(is_colon, "`:`")?;
+                    let ty = self.parse_type()?;
+                    named_fields.push(EnumNamedField {
+                        name: field_name,
+                        ty: ty.clone(),
+                        span: self.span(field_start, ty.span.end),
+                    });
+                    if self.consume(is_comma).is_some() {
+                        continue;
+                    }
+                    if self.check(is_identifier) {
+                        continue;
+                    }
+                    if !self.check(is_right_brace) {
+                        return Err(self.error("`,` ou `}`"));
+                    }
+                }
+                self.expect(is_right_brace, "`}`")?;
             }
             let end = self.previous_span().end;
             variants.push(EnumVariant {
                 name: variant_name,
                 fields,
+                named_fields,
                 span: self.span(variant_start, end),
             });
             if self.consume(is_comma).is_some() {

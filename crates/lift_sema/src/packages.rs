@@ -294,6 +294,9 @@ fn qualify(hir: &mut HirProgram, package: PackageId, next: &mut u32) {
                     for field in &mut variant.fields {
                         q.ty(field);
                     }
+                    for field in &mut variant.named_fields {
+                        q.ty(&mut field.ty);
+                    }
                 }
             }
             HirDeclaration::ExternStruct(s) => {

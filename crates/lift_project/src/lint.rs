@@ -207,9 +207,16 @@ impl Visitor {
                     self.expression(initial);
                 }
             }
-            HirExprKind::EnumConstruct { fields, .. } => {
+            HirExprKind::EnumConstruct {
+                fields,
+                named_fields,
+                ..
+            } => {
                 for field in fields {
                     self.expression(field);
+                }
+                for field in named_fields {
+                    self.expression(&field.value);
                 }
             }
             HirExprKind::OptionSome(value)

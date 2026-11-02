@@ -397,9 +397,16 @@ fn observe(expression: &HirExpr, node: &mut Node) {
                 observe(initial, node);
             }
         }
-        HirExprKind::EnumConstruct { fields, .. } => {
+        HirExprKind::EnumConstruct {
+            fields,
+            named_fields,
+            ..
+        } => {
             for field in fields {
                 observe(field, node);
+            }
+            for field in named_fields {
+                observe(&field.value, node);
             }
         }
         HirExprKind::FunctionValue { .. } => {}

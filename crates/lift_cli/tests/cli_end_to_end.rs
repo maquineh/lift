@@ -615,6 +615,36 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
 }
 
 #[test]
+fn enum_fields_example_runs_named_payloads() {
+    let directory = TempDir::new("enum-fields");
+    let source = directory.path().join("enum-fields.lift");
+    fs::write(&source, include_str!("../../../examples/enum-fields.lift")).unwrap();
+    let expected = "12.56\n6\n0\ncircle 2\ntrue\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("enum-fields {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("enum-fields"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário enum-fields");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn enums_example_runs_payloads_and_exhaustive_match() {
     let directory = TempDir::new("enums");
     let source = directory.path().join("enums.lift");

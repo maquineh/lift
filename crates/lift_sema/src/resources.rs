@@ -97,7 +97,16 @@ fn expression_uses_db(expression: &HirExpr) -> bool {
         HirExprKind::ClosureCall { callee, arguments } => {
             expression_uses_db(callee) || arguments.iter().any(expression_uses_db)
         }
-        HirExprKind::EnumConstruct { fields, .. } => fields.iter().any(expression_uses_db),
+        HirExprKind::EnumConstruct {
+            fields,
+            named_fields,
+            ..
+        } => {
+            fields.iter().any(expression_uses_db)
+                || named_fields
+                    .iter()
+                    .any(|field| expression_uses_db(&field.value))
+        }
         HirExprKind::ArrayMethod {
             array,
             callback,

@@ -1,0 +1,30 @@
+// EN: Enum variants with named payload fields.
+// PT-BR: Variantes de enum com payloads nomeados.
+enum Shape {
+    Circle { radius: number },
+    Rect { width: number, height: number },
+    Empty,
+}
+
+function area(shape: Shape): number {
+    match shape {
+        Shape.Circle(radius) => { return 3.14 * radius * radius; }
+        Shape.Rect(width, height) => { return width * height; }
+        Shape.Empty => { return 0.0; }
+    }
+}
+
+function describe(shape: Shape): string {
+    match shape {
+        Shape.Circle(radius) => { return `circle ${radius}`; }
+        Shape.Rect(width, height) => { return `rect ${width}x${height}`; }
+        Shape.Empty => { return "empty"; }
+    }
+}
+
+console.log(area(Shape.Circle({ radius: 2.0 })));
+console.log(area(Shape.Rect({ width: 2.0, height: 3.0 })));
+console.log(area(Shape.Empty));
+console.log(describe(Shape.Circle({ radius: 2.0 })));
+const copy = Shape.Rect({ width: 2.0, height: 3.0 });
+console.log(copy == Shape.Rect({ width: 2.0, height: 3.0 }));

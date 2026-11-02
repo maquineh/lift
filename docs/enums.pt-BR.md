@@ -28,10 +28,11 @@ const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 enum Name {
     Variant,
     Variant(Type, Type),
+    Variant { field: Type, other: Type },
 }
 ```
 
-- Variantes têm nome e zero ou mais **payloads posicionais**. Vírgulas entre variantes e a vírgula final são opcionais.
+- Variantes têm nome e nenhum payload, **payloads posicionais** ou **campos nomeados** (formas mutuamente exclusivas). Vírgulas entre variantes/campos e a vírgula final são opcionais.
 - Tipos de payload são tipos de valor Lift comuns: primitivos, `string`, arrays, interfaces, `Option` e `Result`. Um payload de variante não pode conter outro enum, recurso opaco, closure ou `DbValue` neste incremento.
 - Declarações de enum podem vir antes ou depois das funções que as usam. Módulos de arquivo compartilham o namespace flat, então um enum declarado em módulo importado fica visível no pacote; enums qualificados por pacote seguem as mesmas regras dos demais tipos locais.
 - Um enum precisa de ao menos uma variante. Nomes duplicados (contra interfaces/funções) e variantes duplicadas são rejeitados.
@@ -41,10 +42,10 @@ enum Name {
 ```lift
 const empty = Shape.Empty;
 const circle = Shape.Circle(2.0);
-const rect = Shape.Rect(2.0, 3.0);
+const named = Shape.NamedCircle({ radius: 2.0 });
 ```
 
-- `Enum.Variant(args...)` verifica a contagem de payloads e o tipo de cada argumento antes do codegen; os argumentos são materializados como valores owned.
+- Variantes posicionais usam `Enum.Variant(args...)`; variantes com campos nomeados usam um object literal `Enum.Variant({ field: value, ... })`. Contagem, nomes de campo, campos ausentes/desconhecidos/duplicados e tipo de cada valor são checados antes do codegen; valores são materializados como owned.
 - Variante com payload precisa ser chamada; variante sem payload é usada diretamente. Parênteses vazios são aceitos para variante sem payload.
 - Enums são tipos de valor: podem ficar em arrays, ser passados/retornados e servir de payload de `Option`/`Result`. Atribuições/cópias seguem as regras normais de clone de Lift (o enum Rust deriva `Clone, Debug, PartialEq`).
 - Igualdade é estrutural: `a == b` / `a != b` comparam variante e payloads. Ordem (`<`, `>`) não é suportada.
@@ -62,7 +63,7 @@ match shape {
 }
 ```
 
-- Patterns são qualificados (`Shape.Circle(...)`) e ligam payloads posicionalmente. A contagem de bindings precisa coincidir com a de payloads da variante.
+- Patterns são qualificados (`Shape.Circle(...)`). Variantes posicionais ligam argumentos em ordem; variantes com campos nomeados ligam na ordem de declaração dos campos usando a mesma sintaxe posicional (por exemplo, `Shape.Circle(radius)` para `{ radius: number }`). A contagem de bindings precisa coincidir com a de payloads.
 - Bindings são valores imutáveis com escopo no braço; campos podem ser mutados quando o payload é struct (o pattern Rust gerado usa `mut`).
 - O nome do enum no pattern precisa coincidir com o do scrutinee. Braço ausente, variante duplicada, variante desconhecida e pattern de outro enum são `sema.InvalidMatch`.
 - Um match é exaustivo quando toda variante declarada tem exatamente um braço. Não há braço wildcard `_`, guarda ou pattern aninhado neste incremento.
@@ -71,10 +72,10 @@ match shape {
 
 ## Limites
 
-- Sem campos nomeados de payload, discriminantes explícitos/valores numéricos, métodos/`impl` em enums, variantes genéricas ou enums recursivos (uma variante não pode carregar o próprio enum nem outro enum).
+- Sem discriminantes explícitos/valores numéricos, métodos/`impl` em enums, variantes genéricas ou enums recursivos (uma variante não pode carregar o próprio enum nem outro enum). Enums ainda não podem ser campos de interface.
 - Enums não podem aparecer em campos de interface, layouts externos, payloads de callback via FFI ou posições de `DbValue`.
 - A sintaxe de union TypeScript `type A = B | C` não está implementada; tagged unions são expressas com este `enum` nominal.
 - Sem wildcard/guarda/pattern aninhado, sem expressão `match` de enum e sem `switch`.
 - Igualdade exige tipos de enum idênticos; não há coerção entre enums.
 
-Testes de parser, semântica, codegen e CLI cobrem declarações, construção de payload, match exaustivo, variantes duplicadas/ausentes, limites, igualdade, semântica de valor e execução nativa de [`examples/enums.lift`](../examples/enums.lift).
+Testes de parser, semântica, codegen e CLI cobrem declarações, construção de payload posicional e nomeado, match exaustivo, variantes/campos duplicados/ausentes, limites, igualdade, semântica de valor e execução nativa de [`examples/enums.lift`](../examples/enums.lift) e [`examples/enum-fields.lift`](../examples/enum-fields.lift).

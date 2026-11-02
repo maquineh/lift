@@ -221,6 +221,58 @@ fn parses_enum_declarations_and_qualified_match_patterns() {
 }
 
 #[test]
+fn parses_enum_named_fields_and_object_payloads() {
+    let source = r#"
+        enum Shape {
+            Circle { radius: number },
+            Rect { width: number, height: number },
+            Empty,
+        }
+        const value: Shape = Shape.Circle({ radius: 2.0 });
+        match value {
+            Shape.Circle(radius) => { console.log(radius); }
+            Shape.Rect(width, height) => { console.log(width); }
+            Shape.Empty => { console.log(0); }
+        }
+    "#;
+    let program = parse_source(source).expect("enum com campos nomeados");
+    let Declaration::Enum(enumeration) = &program.declarations[0] else {
+        panic!("enum")
+    };
+    assert!(enumeration.variants[0].fields.is_empty());
+    assert_eq!(enumeration.variants[0].named_fields.len(), 1);
+    assert_eq!(enumeration.variants[0].named_fields[0].name.name, "radius");
+    assert_eq!(enumeration.variants[1].named_fields.len(), 2);
+    let Declaration::Statement(Statement::Variable(variable)) = &program.declarations[1] else {
+        panic!("variable")
+    };
+    let ExpressionKind::Call(call) = &variable.initializer.kind else {
+        panic!("constructor")
+    };
+    assert_eq!(call.arguments.len(), 1);
+    let ExpressionKind::ObjectLiteral(object) = &call.arguments[0].kind else {
+        panic!("object literal")
+    };
+    assert_eq!(object.fields[0].name.name, "radius");
+    let Declaration::Statement(Statement::Match(match_)) = &program.declarations[2] else {
+        panic!("match")
+    };
+    assert!(matches!(
+        match_.arms[0].pattern.kind,
+        lift_ast::MatchPatternKind::EnumVariant { .. }
+    ));
+
+    for rejected in [
+        "enum Shape { Circle { radius number } }",
+        "enum Shape { Circle { radius: } }",
+        "enum Shape { Circle { radius: number }",
+        "enum Shape { Circle { : number } }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
 fn parses_match_option_and_result_patterns() {
     let source = r#"
         match value {

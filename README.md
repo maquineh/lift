@@ -230,7 +230,7 @@ The scrutinee is evaluated once and cloned when it is a place, so the original v
 
 ## Enums
 
-Enums are nominal tagged unions with positional payloads:
+Enums are nominal tagged unions with positional payloads or named fields:
 
 ```lift
 enum Shape {
@@ -250,7 +250,7 @@ function area(shape: Shape): number {
 const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 ```
 
-A variant is constructed with `Shape.Circle(2.0)` and a payload-less variant with `Shape.Empty`; payload argument count and types are checked. Enums are value types with structural equality, usable in arrays, parameters, returns, and `Option`/`Result` payloads. Matching requires exactly one arm per variant and binds payloads positionally; missing/duplicate/unknown variants are rejected. Enums cannot be interface fields, FFI parameters/returns, or contain other enums/recursive payloads yet; there are no named-field variants, explicit discriminants, or TypeScript `type A = B | C` unions. See [enums](docs/enums.md).
+A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `Shape.Circle({ radius: 2.0 })`, and a payload-less variant with `Shape.Empty`; payload count/field names/types are checked. Enums are value types with structural equality, usable in arrays, parameters, returns, and `Option`/`Result` payloads. Matching requires exactly one arm per variant and binds payloads positionally; missing/duplicate/unknown variants are rejected. Enums cannot be interface fields, FFI parameters/returns, or contain other enums/recursive payloads yet; there are no explicit discriminants or TypeScript `type A = B | C` unions. Named-field variants bind positionally in field declaration order when matched. See [enums](docs/enums.md).
 
 ## Optional values
 
@@ -306,7 +306,7 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 - Loops cover `while` and `for...of` over arrays with `break`/`continue`; C-style `for`, labels, ranges, iterator protocol, and loop expressions are not implemented.
 - Array methods cover `map`, `filter`, `find`, `some`, `every`, `forEach`, and `reduce`; `flatMap`, `sort`, index parameters, lazy iterators, and mutating methods such as `push` are not implemented.
 - Matching covers `Option`/`Result` and nominal enums; wildcards, guards, nested patterns, and TypeScript union types are not implemented.
-- Enums use positional payloads only; named-field variants, recursive enums, enums in interfaces/FFI, explicit discriminants, and methods on enums are not implemented.
+- Enums support positional payloads and named fields; recursive enums, enums in interfaces/FFI, explicit discriminants, and methods on enums are not implemented.
 - The [local notes service](examples/notes-service/README.md) defines DTOs, synchronous handlers, static routes and SQL in Lift. The [database API](stdlib/lift_db/README.md) provides configurable SQLite/PostgreSQL pools, parameterized execute/query, materialized rows and owned transactions. The server owns the pool and handlers borrow it.
 
 The service exercises the documented SQL/scalar and static HTTP contracts. See the [database compatibility plan](docs/database-compatibility.md) for the backend/version matrix and the [callback/HTTP contract](docs/callbacks-and-web-contract.md) for adapter limits.
@@ -330,6 +330,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/array-methods.lift` — `map`, `filter`, `find`, `some`, `every`, `forEach`, `reduce`, chaining, and callbacks.
 - `examples/match.lift` — exhaustive `match` for `Option`, `Result`, `void` success, and loop control inside arms.
 - `examples/enums.lift` — nominal enums with positional payloads, exhaustive variant match, equality, and arrays of enums.
+- `examples/enum-fields.lift` — named-field payloads, object-literal construction, and field-order matching.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

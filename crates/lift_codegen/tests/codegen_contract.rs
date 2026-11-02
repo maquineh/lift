@@ -163,6 +163,31 @@ fn emits_enums_and_qualified_match_patterns() {
 }
 
 #[test]
+fn emits_named_enum_variants_with_object_payloads() {
+    let rust = emit_rust(&lower(
+        r#"
+        enum Shape {
+            Circle { radius: number },
+            Empty,
+        }
+        function area(shape: Shape): number {
+            match shape {
+                Shape.Circle(radius) => { return radius; }
+                Shape.Empty => { return 0.0; }
+            }
+        }
+        const value: Shape = Shape.Circle({ radius: 2.0 });
+        console.log(area(value));
+        "#,
+    ));
+    assert!(rust.contains("enum __lift_type_"), "{rust}");
+    assert!(rust.contains("__lift_variant_"), "{rust}");
+    assert!(rust.contains("__lift_field_"), "{rust}");
+    assert!(rust.contains(" { "), "{rust}");
+    assert!(rust.contains("__lift_field_"), "{rust}");
+}
+
+#[test]
 fn emits_exhaustive_matches_for_option_and_result() {
     let rust = emit_rust(&lower(
         r#"
