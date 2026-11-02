@@ -98,6 +98,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `examples/registry.lift` | Consome `num-integer` 0.1.46 do registry e imprime um MDC. |
 | `examples/liveness.lift` | Decisões clone/move no controle de fluxo com saídas observáveis verificadas por rustc. |
 | `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays e campos opcionais (omitidos e explícitos), narrowing entre guardas e loops e preservação de origens. |
+| `examples/fnmut.lift` | Captures mutáveis de closure com estado persistente independente. |
 | `examples/generics.lift` | Identidade/igualdade/containers genéricos inferidos e execução nativa. |
 | `examples/unions.lift` | Uniões `type A = B | C`, construção por object literal, matching exaustivo, membros enum e recursão. |
 | `examples/recursive-enums.lift` | Enums recursivos com Box automático, campos de interface com enum e matching recursivo. |

@@ -440,6 +440,7 @@ impl Qualifier {
                 captures,
                 parameters,
                 body,
+                ..
             } => {
                 for (id, e) in captures {
                     self.id(id);

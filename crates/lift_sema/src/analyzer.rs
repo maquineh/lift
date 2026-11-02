@@ -3691,15 +3691,7 @@ impl<'a> BodyChecker<'a> {
                 snapshots.push((name, binding.ty, self.materialize_owned(source, false)));
             }
         }
-        for (name, _, _) in &snapshots {
-            if block_mutates_name(&closure.body, name) {
-                return Err(SemaError::new(
-                    SemaErrorKind::UnsupportedOwnershipPattern,
-                    "captures de closure são snapshots somente leitura; mutar o capture não é suportado",
-                    span,
-                ));
-            }
-        }
+
         let signature = FunctionInfo {
             name: "$closure".into(),
             type_parameters: Vec::new(),
@@ -3760,7 +3752,7 @@ impl<'a> BodyChecker<'a> {
                 BindingInfo {
                     id,
                     ty,
-                    binding: Some(BindingKind::Const),
+                    binding: Some(BindingKind::Let),
                     parameter_mode: None,
                     parameter_mutated: false,
                     narrowed: false,
@@ -3820,16 +3812,7 @@ impl<'a> BodyChecker<'a> {
                 span,
             ));
         }
-        if captures
-            .iter()
-            .any(|(id, _)| checker.mutable_bindings.contains(id))
-        {
-            return Err(SemaError::new(
-                SemaErrorKind::UnsupportedOwnershipPattern,
-                "captures de closure são snapshots somente leitura",
-                span,
-            ));
-        }
+
         for parameter in &mut parameters {
             parameter.requires_mut_binding = mutated.contains(&parameter.name)
                 || checker.mutable_bindings.contains(&parameter.id);
@@ -3838,9 +3821,15 @@ impl<'a> BodyChecker<'a> {
             parameters.iter().map(|p| p.ty.clone()).collect(),
             Box::new(result),
         );
+        let mutable_captures = captures
+            .iter()
+            .filter(|(id, _)| checker.mutable_bindings.contains(id))
+            .map(|(id, _)| *id)
+            .collect();
         Ok(self.expr(
             HirExprKind::Closure {
                 captures,
+                mutable_captures,
                 parameters,
                 body,
             },

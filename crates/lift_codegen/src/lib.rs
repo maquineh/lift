@@ -265,6 +265,7 @@ struct Emitter {
     /// Nomes Lift de tipos externos: campos usam o nome Rust, sem mangle.
     extern_structs: HashSet<String>,
     parameter_modes: HashMap<BindingId, ParameterPassMode>,
+    capture_cells: HashMap<BindingId, String>,
     next_temp_name: u32,
 }
 
@@ -378,6 +379,7 @@ impl Emitter {
             enum_named_boxed,
             extern_structs,
             parameter_modes: HashMap::new(),
+            capture_cells: HashMap::new(),
             next_temp_name: 0,
         }
     }
@@ -693,8 +695,16 @@ impl Emitter {
                 ));
             }
             HirStatement::Assignment(assignment) => {
-                let target = self.expression(&assignment.target);
                 let value = self.expression(&assignment.value);
+                if let HirExprKind::Local { id, .. } = &assignment.target.kind {
+                    if let Some(cell) = self.capture_cells.get(id).cloned() {
+                        let temporary = self.temp_name();
+                        self.line(format!("let {temporary} = {value};"));
+                        self.line(format!("*{cell}.borrow_mut() = {temporary};"));
+                        return;
+                    }
+                }
+                let target = self.expression(&assignment.target);
                 self.line(format!("{target} = {value};"));
             }
             HirStatement::Narrow(narrowing) => {
@@ -956,11 +966,25 @@ impl Emitter {
 
     fn expression(&mut self, expression: &HirExpr) -> String {
         match &expression.kind {
-            HirExprKind::Closure { captures, parameters, body } => {
+            HirExprKind::Closure {
+                captures,
+                mutable_captures,
+                parameters,
+                body,
+            } => {
+                let previous_cells = self.capture_cells.clone();
                 let mut statements = Vec::new();
                 for (id, value) in captures {
                     let value = self.expression(value);
-                    statements.push(format!("let {} = {value};", binding_name(*id)));
+                    if mutable_captures.contains(id) {
+                        let cell = self.temp_name();
+                        statements.push(format!(
+                            "let {cell} = ::std::rc::Rc::new(::std::cell::RefCell::new({value}));"
+                        ));
+                        self.capture_cells.insert(*id, cell);
+                    } else {
+                        statements.push(format!("let {} = {value};", binding_name(*id)));
+                    }
                 }
                 let parameters = parameters.iter().map(|p| {
                     self.parameter_modes.insert(p.id, p.pass_mode);
@@ -970,6 +994,7 @@ impl Emitter {
                 let previous = std::mem::take(&mut self.output);
                 self.emit_block_contents(body);
                 let body = std::mem::replace(&mut self.output, previous);
+                self.capture_cells = previous_cells;
                 let boxed_type = self.rust_type(&expression.ty);
                 statements.push(format!(
                     "(::std::rc::Rc::new(move |{parameters}| -> {} {{\n{body}\n}}) as {boxed_type})",
@@ -1201,7 +1226,11 @@ impl Emitter {
                 format!("String::from({})", rust_string_literal(value))
             }
             HirExprKind::BooleanLiteral(value) => value.to_string(),
-            HirExprKind::Local { id, .. } => binding_name(*id),
+            HirExprKind::Local { id, .. } => self
+                .capture_cells
+                .get(id)
+                .map(|cell| format!("(*{cell}.borrow())"))
+                .unwrap_or_else(|| binding_name(*id)),
             HirExprKind::StructLiteral {
                 struct_name,
                 fields,

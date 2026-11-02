@@ -89,6 +89,7 @@ fn expression_uses_db(expression: &HirExpr) -> bool {
             captures,
             parameters,
             body,
+            ..
         } => {
             captures.iter().any(|(_, e)| expression_uses_db(e))
                 || parameters.iter().any(|p| p.ty.needs_db_runtime())
@@ -496,6 +497,7 @@ fn expr(e: &HirExpr, state: &mut State, errors: &mut Vec<SemaError>, consume: bo
             captures,
             parameters,
             body,
+            ..
         } => {
             for (_, capture) in captures {
                 if capture.ty.contains_resource() {

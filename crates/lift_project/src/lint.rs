@@ -182,6 +182,7 @@ impl Visitor {
                 captures,
                 parameters,
                 body,
+                ..
             } => {
                 for (_, initializer) in captures {
                     self.expression(initializer);

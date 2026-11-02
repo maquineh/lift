@@ -1,0 +1,16 @@
+// EN: Mutable closure captures (FnMut-style state) via interior mutability.
+// PT-BR: Captures mutáveis de closure (estado estilo FnMut) via mutabilidade interior.
+function makeCounter(): () => int {
+    let count = 0;
+    return (): int => {
+        count = count + 1;
+        return count;
+    };
+}
+
+const counter = makeCounter();
+console.log(counter());
+console.log(counter());
+console.log(counter());
+const other = makeCounter();
+console.log(other());

@@ -201,3 +201,14 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   métodos genéricos, callbacks/FFI genéricos ou parâmetros só no retorno.
   Exemplo `examples/generics.lift`, testes `generics_contract.rs`, docs
   `docs/generics*.md`.
+### Captures mutáveis de closure
+
+- `HirExprKind::Closure` ganhou `mutable_captures`; o BodyChecker declara
+  captures com `BindingKind::Let` e deixa atribuições passarem.
+- Codegen mantém `capture_cells: HashMap<BindingId, String>`; captures mutáveis
+  viram `Rc<RefCell<T>>`, leituras viram `(*cell.borrow())` e atribuições usam
+  `borrow_mut` com temporário para evitar borrow duplo.
+- A closure continua `Rc<dyn Fn>`; o estado persiste entre chamadas, mas o
+  snapshot não atualiza a variável externa. Closures aninhadas capturam leitura.
+- Teste `closures_mutate_captured_state`, exemplo `examples/fnmut.lift`, docs
+  `docs/fnmut*.md`.

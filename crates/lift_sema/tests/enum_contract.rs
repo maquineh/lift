@@ -434,3 +434,35 @@ fn enum_named_fields_reject_invalid_object_payloads() {
         );
     }
 }
+
+#[test]
+fn closures_mutate_captured_state() {
+    let program = lower(
+        r#"
+        function makeCounter(): () => int {
+            let count = 0;
+            return (): int => {
+                count = count + 1;
+                return count;
+            };
+        }
+        const counter = makeCounter();
+        console.log(counter());
+        "#,
+    )
+    .unwrap();
+    let function = function(&program, "makeCounter");
+    let HirStatement::Return(return_statement) = &function.body.statements[1] else {
+        panic!("return")
+    };
+    let Some(value) = &return_statement.value else {
+        panic!("value")
+    };
+    let HirExprKind::Closure {
+        mutable_captures, ..
+    } = &value.kind
+    else {
+        panic!("closure")
+    };
+    assert_eq!(mutable_captures.len(), 1);
+}

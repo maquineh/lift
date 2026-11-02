@@ -252,6 +252,10 @@ const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 
 Uma variante é construída com `Shape.Circle(2.0)`, uma variante com campos nomeados com `Shape.Circle({ radius: 2.0 })`, e uma sem payload com `Shape.Empty`; contagem/nomes de campo/tipos são checados. Enums são tipos de valor com igualdade estrutural, utilizáveis em arrays, parâmetros, retornos e payloads de `Option`/`Result`. Match exige exatamente um braço por variante e liga payloads posicionalmente; variante ausente/duplicada/desconhecida é rejeitada. Enums podem ser campos de interface e payloads recursivos recebem `Box` inserido pelo compilador; parâmetros/retornos FFI ainda rejeitam enums, e não há discriminantes explícitos ou unions TypeScript `type A = B | C`. Variantes com campos nomeados ligam posicionalmente na ordem de declaração ao casar. Veja [enums](docs/enums.pt-BR.md).
 
+## Captures mutáveis
+
+Closures podem mutar variáveis `let` capturadas; o Rust gerado armazena essas captures em `Rc<RefCell<T>>`, mantendo estado entre chamadas sem mudar o tipo de callback `Rc<dyn Fn>`. As captures continuam snapshots: mutações não atualizam a variável externa, então use o retorno da closure, `reduce` ou `for...of` para acumular fora. Veja [captures mutáveis](docs/fnmut.pt-BR.md).
+
 ## Funções genéricas
 
 Funções podem declarar parâmetros de tipo inferidos em cada chamada:
@@ -376,6 +380,7 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 - `examples/recursive-enums.lift` — enums recursivos com indireção `Box`, campos de interface e matching recursivo.
 - `examples/unions.lift` — uniões `type A = B | C`, construção por object literal, matching exaustivo, membros enum e recursão.
 - `examples/generics.lift` — identidade/igualdade/containers genéricos com parâmetros de tipo inferidos.
+- `examples/fnmut.lift` — estado mutável de closure com contadores independentes.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 

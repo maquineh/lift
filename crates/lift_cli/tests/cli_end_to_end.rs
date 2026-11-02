@@ -615,6 +615,23 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
 }
 
 #[test]
+fn fnmut_example_runs_mutable_closure_state() {
+    let directory = TempDir::new("fnmut");
+    let source = directory.path().join("fnmut.lift");
+    fs::write(&source, include_str!("../../../examples/fnmut.lift")).unwrap();
+    let expected = "1\n2\n3\n1\n";
+    let output = cli().arg("run").arg(&source).output().unwrap();
+    assert_success(&output, "fnmut run");
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .replace("\r\n", "\n")
+            .ends_with(expected),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn generics_example_runs_inferred_generic_functions() {
     let directory = TempDir::new("generics");
     let source = directory.path().join("generics.lift");

@@ -99,6 +99,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `examples/registry.lift` | Consume `num-integer` 0.1.46 from the registry and print a GCD. |
 | `examples/liveness.lift` | Exercise clone/move decisions across control flow and verify observable outputs with rustc. |
 | `examples/option.lift` | Counters proving exactly-once/lazy fallbacks, optional arrays and fields (omitted and explicit), flow narrowing across guards and loops, and retained sources. |
+| `examples/fnmut.lift` | Mutable closure captures with persistent independent state. |
 | `examples/generics.lift` | Inferred generic identity/equality/containers and native execution. |
 | `examples/unions.lift` | `type A = B | C` unions, object-literal construction, exhaustive matching, enum members, and recursion. |
 | `examples/recursive-enums.lift` | Recursive enums with automatic Box, interface enum fields, and recursive matching. |

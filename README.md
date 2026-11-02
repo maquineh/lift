@@ -252,6 +252,10 @@ const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 
 A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `Shape.Circle({ radius: 2.0 })`, and a payload-less variant with `Shape.Empty`; payload count/field names/types are checked. Enums are value types with structural equality, usable in arrays, parameters, returns, and `Option`/`Result` payloads. Matching requires exactly one arm per variant and binds payloads positionally; missing/duplicate/unknown variants are rejected. Enums can be interface fields and recursive payloads are wrapped in compiler-inserted `Box`; FFI parameters/returns still reject enums, and there are no explicit discriminants or TypeScript `type A = B | C` unions. Named-field variants bind positionally in field declaration order when matched. See [enums](docs/enums.md).
 
+## Mutable closure captures
+
+Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
+
 ## Generic functions
 
 Functions can declare type parameters inferred from each call:
@@ -376,6 +380,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/recursive-enums.lift` — recursive enums with `Box` indirection, interface fields, and recursive matching.
 - `examples/unions.lift` — `type A = B | C` unions, object-literal construction, exhaustive matching, enum members, and recursion.
 - `examples/generics.lift` — generic identity/equality/containers with inferred type parameters.
+- `examples/fnmut.lift` — mutable closure state with independent counters.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

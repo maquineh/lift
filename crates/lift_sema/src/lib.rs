@@ -532,6 +532,8 @@ pub enum HirExprKind {
     /// Captures are owned snapshots evaluated at construction, outside the body CFG.
     Closure {
         captures: Vec<(BindingId, HirExpr)>,
+        /// Captures mutados no corpo; o codegen usa `Rc<RefCell<T>>`.
+        mutable_captures: Vec<BindingId>,
         parameters: Vec<HirParameter>,
         body: HirBlock,
     },
