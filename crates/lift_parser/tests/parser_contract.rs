@@ -163,6 +163,64 @@ fn source_aware_parser_preserves_empty_program_and_eof_error_ids() {
 }
 
 #[test]
+fn parses_enum_declarations_and_qualified_match_patterns() {
+    let source = r#"
+        enum Shape {
+            Circle(number),
+            Rect(number, number),
+            Empty,
+        }
+        match shape {
+            Shape.Circle(radius) => { console.log(radius); }
+            Shape.Rect(width, height) => { console.log(width); }
+            Shape.Empty => { console.log(0); }
+        }
+    "#;
+    let program = parse_source(source).expect("enum válido");
+    let Declaration::Enum(enumeration) = &program.declarations[0] else {
+        panic!("enum")
+    };
+    assert_eq!(enumeration.name.name, "Shape");
+    assert_eq!(enumeration.variants.len(), 3);
+    assert_eq!(enumeration.variants[0].name.name, "Circle");
+    assert_eq!(enumeration.variants[0].fields.len(), 1);
+    assert_eq!(enumeration.variants[1].fields.len(), 2);
+    assert!(enumeration.variants[2].fields.is_empty());
+    let Declaration::Statement(Statement::Match(match_)) = &program.declarations[1] else {
+        panic!("match")
+    };
+    let lift_ast::MatchPatternKind::EnumVariant {
+        enum_name,
+        variant,
+        bindings,
+    } = &match_.arms[0].pattern.kind
+    else {
+        panic!("enum pattern")
+    };
+    assert_eq!(enum_name.name, "Shape");
+    assert_eq!(variant.name, "Circle");
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].name, "radius");
+    assert!(matches!(
+        match_.arms[2].pattern.kind,
+        lift_ast::MatchPatternKind::EnumVariant { .. }
+    ));
+
+    for rejected in [
+        "enum { A }",
+        "enum Shape { A( }",
+        "enum Shape { A(number }",
+        "enum Shape A }",
+        "match value { Shape.Circle( => { } }",
+        "match value { Shape.Circle(a b) => { } }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+    // Vírgulas entre variantes são opcionais, inclusive a final.
+    parse_source("enum Shape { A B(number,) }").unwrap();
+}
+
+#[test]
 fn parses_match_option_and_result_patterns() {
     let source = r#"
         match value {

@@ -256,6 +256,9 @@ fn qualify(hir: &mut HirProgram, package: PackageId, next: &mut u32) {
             HirDeclaration::Struct(s) => {
                 q.structures.insert(s.name.clone());
             }
+            HirDeclaration::Enum(e) => {
+                q.structures.insert(e.name.clone());
+            }
             HirDeclaration::ExternStruct(s) => {
                 q.structures.insert(s.name.clone());
             }
@@ -283,6 +286,14 @@ fn qualify(hir: &mut HirProgram, package: PackageId, next: &mut u32) {
                 s.name = symbol(package, &s.name);
                 for f in &mut s.fields {
                     q.ty(&mut f.ty);
+                }
+            }
+            HirDeclaration::Enum(e) => {
+                e.name = symbol(package, &e.name);
+                for variant in &mut e.variants {
+                    for field in &mut variant.fields {
+                        q.ty(field);
+                    }
                 }
             }
             HirDeclaration::ExternStruct(s) => {
@@ -382,6 +393,19 @@ impl Qualifier {
                             self.id(&mut binding.id);
                             self.ty(&mut binding.ty);
                         }
+                        crate::HirMatchPattern::EnumVariant {
+                            enum_name,
+                            bindings,
+                            ..
+                        } => {
+                            if self.structures.contains(enum_name) {
+                                *enum_name = symbol(self.package, enum_name);
+                            }
+                            for binding in bindings {
+                                self.id(&mut binding.id);
+                                self.ty(&mut binding.ty);
+                            }
+                        }
                         crate::HirMatchPattern::None | crate::HirMatchPattern::Ok(None) => {}
                     }
                     self.block(&mut arm.body);
@@ -437,6 +461,16 @@ impl Qualifier {
                 self.expr(callback);
                 if let Some(initial) = initial {
                     self.expr(initial);
+                }
+            }
+            HirExprKind::EnumConstruct {
+                enum_name, fields, ..
+            } => {
+                if self.structures.contains(enum_name) {
+                    *enum_name = symbol(self.package, enum_name);
+                }
+                for field in fields {
+                    self.expr(field);
                 }
             }
             HirExprKind::FunctionValue {

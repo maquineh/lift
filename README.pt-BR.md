@@ -206,7 +206,7 @@ const total = values.reduce(0, (accumulator: int, value: int): int => accumulato
 
 O receptor é copiado uma vez, então o array de origem nunca é consumido nem mutado; cada elemento chega ao callback como valor owned. `map` e `filter` retornam novos arrays, `find` retorna `T?`, `some`/`every` fazem curto-circuito, `forEach` retorna `void`, e `reduce` é um fold à esquerda cujo tipo do acumulador vem do valor inicial. Callbacks podem ser closures ou funções nomeadas, e chamadas encadeiam. Método desconhecido, callback com tipo de parâmetro/resultado errado, número errado de argumentos, `find` em `T?[]` ou receptor que não é array são rejeitados antes do codegen. Não há `flatMap`, `sort`, parâmetro de índice, iteradores lazy ou métodos mutantes como `push`. Veja [métodos de array](docs/array-methods.pt-BR.md).
 
-## Match de Option e Result
+## Match de Option, Result e enums
 
 `match` executa exatamente um braço para um `Option<T>` ou `Result<T, E>`, e as duas variantes são obrigatórias:
 
@@ -226,7 +226,31 @@ function describe_result(value: Result<int, string>): string {
 }
 ```
 
-O scrutinee é avaliado uma vez e clonado quando é um place, então o valor original continua utilizável. `some`/`err` ligam um payload owned; `ok()` é a forma de sucesso `void`. Bindings de braço são imutáveis (campos podem ser mutados), e braço ausente ou duplicado é rejeitado. Um match garante retorno quando todos os braços saem, e `break`/`continue` dentro de um braço miram o laço externo. Match de `Result` com recurso opaco é rejeitado; use `?`/`unwrap`. Ainda não há wildcard, guarda, pattern aninhado ou match de union/enum geral. Veja [match de Option e Result](docs/match.pt-BR.md).
+O scrutinee é avaliado uma vez e clonado quando é um place, então o valor original continua utilizável. `some`/`err` ligam um payload owned; `ok()` é a forma de sucesso `void`. Bindings de braço são imutáveis (campos podem ser mutados), e braço ausente ou duplicado é rejeitado. Um match garante retorno quando todos os braços saem, e `break`/`continue` dentro de um braço miram o laço externo. Match de `Result` com recurso opaco é rejeitado; use `?`/`unwrap`. Enums nominais são casados com patterns de variante qualificados; wildcards, guardas, patterns aninhados e tipos union TypeScript não foram implementados. Veja [matching](docs/match.pt-BR.md).
+
+## Enums
+
+Enums são tagged unions nominais com payloads posicionais:
+
+```lift
+enum Shape {
+    Circle(number),
+    Rect(number, number),
+    Empty,
+}
+
+function area(shape: Shape): number {
+    match shape {
+        Shape.Circle(radius) => { return 3.14 * radius * radius; }
+        Shape.Rect(width, height) => { return width * height; }
+        Shape.Empty => { return 0.0; }
+    }
+}
+
+const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
+```
+
+Uma variante é construída com `Shape.Circle(2.0)` e uma sem payload com `Shape.Empty`; contagem e tipos dos payloads são checados. Enums são tipos de valor com igualdade estrutural, utilizáveis em arrays, parâmetros, retornos e payloads de `Option`/`Result`. Match exige exatamente um braço por variante e liga payloads posicionalmente; variante ausente/duplicada/desconhecida é rejeitada. Enums não podem ser campos de interface, parâmetros/retornos FFI, nem conter outros enums/payloads recursivos ainda; não há variantes com campos nomeados, discriminantes explícitos ou unions TypeScript `type A = B | C`. Veja [enums](docs/enums.pt-BR.md).
 
 ## Valores opcionais
 
@@ -281,7 +305,8 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 - Valores Result usam construtores contextuais `result.ok`/`result.err`, propagação `?`/`throw` com correspondência exata de tipo de erro e `try`/`catch` tipado; `finally`, múltiplos catches, matching geral além de `Option`/`Result` e conversão automática `From` não foram implementados.
 - Laços cobrem `while` e `for...of` sobre arrays com `break`/`continue`; `for` estilo C, labels, ranges, protocolo de iterator e expressões de laço não foram implementados.
 - Métodos de array cobrem `map`, `filter`, `find`, `some`, `every`, `forEach` e `reduce`; `flatMap`, `sort`, parâmetro de índice, iteradores lazy e métodos mutantes como `push` não foram implementados.
-- Matching é limitado a `Option`/`Result`; wildcards, guardas, patterns aninhados e unions/enums de usuário não foram implementados.
+- Matching cobre `Option`/`Result` e enums nominais; wildcards, guardas, patterns aninhados e tipos union TypeScript não foram implementados.
+- Enums usam apenas payloads posicionais; variantes com campos nomeados, enums recursivos, enums em interfaces/FFI, discriminantes explícitos e métodos em enums não foram implementados.
 - O [serviço local de notas](examples/notes-service/README.pt-BR.md) declara DTOs, handlers síncronos, rotas e SQL em Lift. A [API de banco](stdlib/lift_db/README.pt-BR.md) oferece pools SQLite/PostgreSQL configuráveis, execute/query parametrizado, resultados materializados e transações owned. O servidor possui o pool e os handlers o emprestam.
 
 O serviço exercita os contratos documentados de SQL/escalares e HTTP estático. Consulte o [plano de compatibilidade de banco](docs/database-compatibility.pt-BR.md) para a matriz de backends/versões e o [contrato de callbacks/HTTP](docs/callbacks-and-web-contract.pt-BR.md) para limites do adaptador.
@@ -303,6 +328,7 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 - `examples/loops.lift` — `for...of`, `while`, `break`/`continue`, escopo de laço e iteração de arrays.
 - `examples/array-methods.lift` — `map`, `filter`, `find`, `some`, `every`, `forEach`, `reduce`, encadeamento e callbacks.
 - `examples/match.lift` — `match` exaustivo para `Option`, `Result`, sucesso `void` e controle de laço nos braços.
+- `examples/enums.lift` — enums nominais com payloads posicionais, match exaustivo de variantes, igualdade e arrays de enums.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 

@@ -77,7 +77,7 @@ pub fn emit_cargo_manifest_for_program(
                 needs_core |= function.body.statements.iter().any(statement_uses_console)
             }
             HirDeclaration::Statement(statement) => needs_core |= statement_uses_console(statement),
-            HirDeclaration::Struct(_) => {}
+            HirDeclaration::Struct(_) | HirDeclaration::Enum(_) => {}
         }
     }
     if needs_core || needs_db || needs_web || !dependencies.is_empty() {
@@ -175,6 +175,7 @@ fn expr_uses_console(expression: &HirExpr) -> bool {
                 || expr_uses_console(callback)
                 || initial.as_deref().is_some_and(expr_uses_console)
         }
+        HirExprKind::EnumConstruct { fields, .. } => fields.iter().any(expr_uses_console),
         HirExprKind::FunctionValue { .. } => false,
         HirExprKind::OptionNone => false,
         HirExprKind::OptionSome(payload) => expr_uses_console(payload),
@@ -276,6 +277,10 @@ impl Emitter {
                     structure.name.clone(),
                     generated_name("__lift_type_", &structure.name),
                 )),
+                HirDeclaration::Enum(enumeration) => Some((
+                    enumeration.name.clone(),
+                    generated_name("__lift_type_", &enumeration.name),
+                )),
                 HirDeclaration::ExternStruct(structure) => {
                     Some((structure.name.clone(), structure.rust_path.clone()))
                 }
@@ -324,6 +329,27 @@ impl Emitter {
                     self.line("");
                 }
                 HirDeclaration::ExternStruct(structure) => self.emit_extern_struct(structure),
+                HirDeclaration::Enum(enumeration) => {
+                    self.line("#[derive(Clone, Debug, PartialEq)]");
+                    self.line(format!("enum {} {{", self.type_name(&enumeration.name)));
+                    self.indent += 1;
+                    for variant in &enumeration.variants {
+                        let fields = variant
+                            .fields
+                            .iter()
+                            .map(|ty| self.rust_type(ty))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        if fields.is_empty() {
+                            self.line(format!("{},", variant_name(&variant.name)));
+                        } else {
+                            self.line(format!("{}({fields}),", variant_name(&variant.name)));
+                        }
+                    }
+                    self.indent -= 1;
+                    self.line("}");
+                    self.line("");
+                }
                 HirDeclaration::Function(function) => {
                     self.emit_function(function);
                     self.line("");
@@ -655,6 +681,28 @@ impl Emitter {
                             let mutability = if binding.requires_mut { "mut " } else { "" };
                             format!("Err({mutability}{})", binding_name(binding.id))
                         }
+                        HirMatchPattern::EnumVariant {
+                            enum_name,
+                            variant,
+                            bindings,
+                        } => {
+                            let path =
+                                format!("{}::{}", self.type_name(enum_name), variant_name(variant));
+                            if bindings.is_empty() {
+                                path
+                            } else {
+                                let bindings = bindings
+                                    .iter()
+                                    .map(|binding| {
+                                        let mutability =
+                                            if binding.requires_mut { "mut " } else { "" };
+                                        format!("{mutability}{}", binding_name(binding.id))
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!("{path}({bindings})")
+                            }
+                        }
                     };
                     self.line(format!("{pattern} => {{"));
                     self.indent += 1;
@@ -803,6 +851,27 @@ impl Emitter {
                 let callee = self.expression(callee);
                 let arguments = arguments.iter().map(|a| self.expression(a)).collect::<Vec<_>>().join(", ");
                 format!("({callee})({arguments})")
+            }
+            HirExprKind::EnumConstruct {
+                enum_name,
+                variant,
+                fields,
+            } => {
+                let path = format!(
+                    "{}::{}",
+                    self.type_name(enum_name),
+                    variant_name(variant)
+                );
+                if fields.is_empty() {
+                    path
+                } else {
+                    let fields = fields
+                        .iter()
+                        .map(|field| self.expression(field))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{path}({fields})")
+                }
             }
             HirExprKind::ArrayMethod {
                 method,
@@ -1342,6 +1411,10 @@ fn loop_label(id: LoopId) -> String {
 
 fn field_name(source_name: &str) -> String {
     generated_name("__lift_field_", source_name)
+}
+
+fn variant_name(source_name: &str) -> String {
+    generated_name("__lift_variant_", source_name)
 }
 
 fn direct_local_id(expression: &HirExpr) -> Option<BindingId> {

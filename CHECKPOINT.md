@@ -2,7 +2,7 @@
 
 - **Data:** 2026-11-02 (America/Manaus)
 - **Branch:** `main`
-- **Último commit antes deste checkpoint:** `5e59af5 chore: declara licenca MIT OR Apache-2.0`
+- **Último commit antes deste checkpoint:** `4e4ace8 feat: checkpoint option, FFI, error, callback, loop and match increments`
 - **Estado:** incrementos abaixo implementados, testados, documentados e reunidos neste checkpoint. O working tree fica limpo após o commit; `target/` e `.lift_cache/` são ignorados.
 
 Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR tipado → Rust → binário). Ele complementa a matriz de testes e os contratos em `docs/`; não substitui essas fontes.
@@ -17,6 +17,7 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 6. **Laços** — `for (const|let item of array)` com snapshot owned, `while`, `break`/`continue` no laço mais interno, interação com `try`/`catch` e labels Rust `'lift_loop_N`.
 7. **Métodos de array** — `map`, `filter`, `find`, `some`, `every`, `forEach` e `reduce`, monomorfizados por elemento, com callback nomeado ou closure e encadeamento.
 8. **Match de Option/Result** — `match` exaustivo com `some(nome)`/`none` e `ok(nome)`/`err(nome)`, `ok()` para sucesso `void`, snapshot do scrutinee, mutação de campos do payload e garantia de retorno por braços.
+9. **Enums nominais com payloads** — `enum Nome { Variante, Variante(Tipo, Tipo) }`, construção `Enum.Variant(...)`, igualdade estrutural, uso em arrays/parâmetros/retornos/Option/Result e `match` exaustivo com patterns qualificados `Enum.Variant(bindings)`.
 
 ## Contratos e limites atuais
 
@@ -25,8 +26,9 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 - Callbacks FFI são trait objects Rust (`&dyn Fn`/`Box<dyn Fn>`), não ponteiros C; assinaturas com `Option`/`Result`/aninhamento são rejeitadas.
 - Laços não têm `for` estilo C, `for...in` sobre índices, labels de usuário, ranges ou protocolo de iterator; o array é sempre clonado como snapshot.
 - Métodos de array não têm `flatMap`, `sort`, parâmetro de índice, iteradores lazy ou métodos mutantes (`push`/`pop`).
-- `match` cobre apenas `Option`/`Result`; não há wildcard, guardas, patterns aninhados, match de primitivos ou unions/enums de usuário.
-- Generics gerais continuam ausentes (`Result` é o único tipo genérico embutido); não há unions/enums nem pattern matching geral.
+- `match` cobre `Option`/`Result` e enums nominais; não há wildcard, guardas, patterns aninhados, match de primitivos ou sintaxe de union TypeScript.
+- Generics gerais continuam ausentes (`Result` é o único tipo genérico embutido).
+- Enums usam payloads posicionais apenas; não há campos nomeados, discriminantes explícitos, enums recursivos, enums em interfaces/FFI, métodos em enums ou `type A = B | C`.
 - Option não entra em arrays/Result aninhado; recursos opacos seguem as regras de ownership e não podem ser payload de `Option` comum nem scrutinee de `match`.
 
 ## Verificação executada neste checkpoint
@@ -37,13 +39,14 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 ```
 
 - Formatação: limpa.
-- Testes: **216 passando**, **36 suítes**, 0 falhas.
+- Testes: **223 passando**, **37 suítes**, 0 falhas.
 - E2E por `check`, `build`, `run` e binário nativo dos exemplos:
   - `examples/loops.lift` → `6 1 2 3 7 8 1 3 4 5 10 20`
   - `examples/array-methods.lift` → `2 8 1 2 4 3 true true 1 2 3 4 10 #3 20 200`
   - `examples/match.lift` → `some 3 / none / ok 8 / err negative / void ok / 5 / 1 / 1`
+  - `examples/enums.lift` → `12.56 / circle 2 / 6 / rect 2x3 / 0 / empty / true / true / false`
   - `examples/errors.lift` e `examples/higher-order.lift` também cobertos por E2E.
-- `lift lint` em `examples/loops.lift`, `examples/array-methods.lift` e `examples/match.lift`: sem avisos.
+- `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift` e `examples/enums.lift`: sem avisos.
 - Skips conhecidos e **pré-existentes** (não causados por estes incrementos): testes de banco cuja cadeia de dependências (`r2d2`/`scheduled-thread-pool`) pede rustc mais novo que o MSRV 1.94.1. Eles permanecem documentados na matriz de testes e devem ser reavaliados quando a dependência for atualizada.
 
 ## Onde retomar
@@ -57,14 +60,15 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - [Laços](docs/loops.md) / [pt-BR](docs/loops.pt-BR.md)
   - [Métodos de array](docs/array-methods.md) / [pt-BR](docs/array-methods.pt-BR.md)
   - [Match de Option/Result](docs/match.md) / [pt-BR](docs/match.pt-BR.md)
+  - [Enums](docs/enums.md) / [pt-BR](docs/enums.pt-BR.md)
 - Matriz de cobertura e pendências: [docs/testing-and-release.md](docs/testing-and-release.md).
 - Mapa de crates, arquivos e exemplos: [docs/source-map.md](docs/source-map.md).
 - Decisões internas: [phase3](.agents/skills/truxt-compiler/references/phase3-decisions.md), [phase4](.agents/skills/truxt-compiler/references/phase4-decisions.md) e [phase5](.agents/skills/truxt-compiler/references/phase5-decisions.md).
-- Exemplos executáveis: `examples/option.lift`, `examples/interop.lift`, `examples/errors.lift`, `examples/higher-order.lift`, `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`.
+- Exemplos executáveis: `examples/option.lift`, `examples/interop.lift`, `examples/errors.lift`, `examples/higher-order.lift`, `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`.
 
 ## Próximos passos sugeridos
 
-1. **Unions/enums + pattern matching geral** — reutiliza o `match` e fecha o sistema algébrico.
+1. **Enums avançados/unions** — campos nomeados, recursão com indireção, enums em interfaces e sintaxe `type A = B | C`.
 2. **Generics gerais** — containers e funções parametrizadas; maior incremento restante.
 3. **Captures mutáveis/`FnMut`** — hoje acumuladores usam `reduce` ou `for...of` explícito.
-4. Polimento: `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.
+4. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.

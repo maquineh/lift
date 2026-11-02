@@ -5,13 +5,13 @@
 use lift_ast::{
     ArrayLiteral, AssignmentStatement, BinaryExpression, BinaryOperator, BindingKind, Block,
     BreakStatement, CallExpression, ContinueStatement, Declaration, ElseBranch, ElseBranchKind,
-    Expression, ExpressionKind, ExpressionStatement, FieldAccessExpression, ForOfStatement,
-    FunctionDeclaration, Identifier, IfStatement, ImportFunctionDeclaration,
-    ImportInterfaceDeclaration, IndexExpression, InterfaceDeclaration, InterfaceField, MatchArm,
-    MatchPattern, MatchPatternKind, MatchStatement, ModuleImportDeclaration, ObjectField,
-    ObjectLiteral, Parameter, ProgramAst, ReturnStatement, SourceId, Span, Statement,
-    ThrowStatement, TryCatchStatement, TypeExpression, TypeExpressionKind, UnaryExpression,
-    UnaryOperator, VariableDeclaration, WhileStatement,
+    EnumDeclaration, EnumVariant, Expression, ExpressionKind, ExpressionStatement,
+    FieldAccessExpression, ForOfStatement, FunctionDeclaration, Identifier, IfStatement,
+    ImportFunctionDeclaration, ImportInterfaceDeclaration, IndexExpression, InterfaceDeclaration,
+    InterfaceField, MatchArm, MatchPattern, MatchPatternKind, MatchStatement,
+    ModuleImportDeclaration, ObjectField, ObjectLiteral, Parameter, ProgramAst, ReturnStatement,
+    SourceId, Span, Statement, ThrowStatement, TryCatchStatement, TypeExpression,
+    TypeExpressionKind, UnaryExpression, UnaryOperator, VariableDeclaration, WhileStatement,
 };
 use lift_lexer::Token;
 
@@ -99,6 +99,7 @@ impl<'tokens> Parser<'tokens> {
                         matches!(
                             token,
                             Token::Interface
+                                | Token::Enum
                                 | Token::Const
                                 | Token::Let
                                 | Token::Impl
@@ -161,6 +162,7 @@ impl<'tokens> Parser<'tokens> {
             Some(Token::Interface) => self
                 .parse_interface_declaration()
                 .map(Declaration::Interface),
+            Some(Token::Enum) => self.parse_enum_declaration().map(Declaration::Enum),
             Some(Token::Function) => self.parse_function_declaration().map(Declaration::Function),
             _ => self.parse_statement().map(Declaration::Statement),
         }
@@ -193,6 +195,54 @@ impl<'tokens> Parser<'tokens> {
         Ok(InterfaceDeclaration {
             name,
             fields,
+            span: self.span(start, close),
+        })
+    }
+
+    /// `enum Nome { Variante, Variante(Tipo, Tipo) }` com payloads posicionais.
+    fn parse_enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {
+        let start = self.expect(is_enum, "`enum`")?.start;
+        let name = self.parse_identifier()?;
+        self.expect(is_left_brace, "`{`")?;
+        let mut variants = Vec::new();
+        while !self.check(is_right_brace) && !self.is_at_end() {
+            let variant_start = self.current_span().start;
+            let variant_name = self.parse_identifier()?;
+            let mut fields = Vec::new();
+            if self.consume(is_left_paren).is_some() {
+                if !self.check(is_right_paren) {
+                    loop {
+                        fields.push(self.parse_type()?);
+                        if self.consume(is_comma).is_none() {
+                            break;
+                        }
+                        if self.check(is_right_paren) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(is_right_paren, "`)`")?;
+            }
+            let end = self.previous_span().end;
+            variants.push(EnumVariant {
+                name: variant_name,
+                fields,
+                span: self.span(variant_start, end),
+            });
+            if self.consume(is_comma).is_some() {
+                continue;
+            }
+            if self.check(is_identifier) {
+                continue;
+            }
+            if !self.check(is_right_brace) {
+                return Err(self.error("`,` ou `}`"));
+            }
+        }
+        let close = self.expect(is_right_brace, "`}`")?.end;
+        Ok(EnumDeclaration {
+            name,
+            variants,
             span: self.span(start, close),
         })
     }
@@ -575,13 +625,45 @@ impl<'tokens> Parser<'tokens> {
 
     fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
         let start = self.current_span().start;
-        let word = match self.current() {
-            Some(Token::Identifier(word)) => word.clone(),
+        let (word, word_span) = match self.current() {
+            Some(Token::Identifier(word)) => (word.clone(), self.current_span()),
             _ => {
-                return Err(self.error("pattern `some(nome)`, `none`, `ok(nome)` ou `err(nome)`"));
+                return Err(self.error(
+                    "pattern `some(nome)`, `none`, `ok(nome)`, `err(nome)` ou `Enum.Variant(...)`",
+                ));
             }
         };
         self.advance();
+        if self.check(is_dot) {
+            self.advance();
+            let variant = self.parse_pattern_binding()?;
+            let mut bindings = Vec::new();
+            if self.consume(is_left_paren).is_some() {
+                if !self.check(is_right_paren) {
+                    loop {
+                        bindings.push(self.parse_pattern_binding()?);
+                        if self.consume(is_comma).is_none() {
+                            break;
+                        }
+                        if self.check(is_right_paren) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(is_right_paren, "`)`")?;
+            }
+            return Ok(MatchPattern {
+                kind: MatchPatternKind::EnumVariant {
+                    enum_name: Identifier {
+                        name: word,
+                        span: word_span,
+                    },
+                    variant,
+                    bindings,
+                },
+                span: self.span(start, self.previous_span().end),
+            });
+        }
         let kind = match word.as_str() {
             "some" => {
                 self.expect(is_left_paren, "`(`")?;
@@ -608,7 +690,9 @@ impl<'tokens> Parser<'tokens> {
                 MatchPatternKind::Err(name)
             }
             _ => {
-                return Err(self.error("pattern `some(nome)`, `none`, `ok(nome)` ou `err(nome)`"));
+                return Err(self.error(
+                    "pattern `some(nome)`, `none`, `ok(nome)`, `err(nome)` ou `Enum.Variant(...)`",
+                ));
             }
         };
         Ok(MatchPattern {
@@ -1275,7 +1359,7 @@ impl<'tokens> Parser<'tokens> {
                 | Token::Continue
                 | Token::Return,
             ) => true,
-            Some(Token::Function | Token::Interface | Token::Import) => !in_block,
+            Some(Token::Function | Token::Interface | Token::Enum | Token::Import) => !in_block,
             _ => false,
         }
     }
@@ -1383,6 +1467,12 @@ fn is_else(token: &Token) -> bool {
 }
 fn is_while(token: &Token) -> bool {
     matches!(token, Token::While)
+}
+fn is_enum(token: &Token) -> bool {
+    matches!(token, Token::Enum)
+}
+fn is_dot(token: &Token) -> bool {
+    matches!(token, Token::Dot)
 }
 fn is_match(token: &Token) -> bool {
     matches!(token, Token::Match)

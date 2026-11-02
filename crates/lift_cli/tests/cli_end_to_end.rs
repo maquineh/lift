@@ -615,6 +615,36 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
 }
 
 #[test]
+fn enums_example_runs_payloads_and_exhaustive_match() {
+    let directory = TempDir::new("enums");
+    let source = directory.path().join("enums.lift");
+    fs::write(&source, include_str!("../../../examples/enums.lift")).unwrap();
+    let expected = "12.56\ncircle 2\n6\nrect 2x3\n0\nempty\ntrue\ntrue\nfalse\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("enums {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("enums"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário enums");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn match_example_runs_option_result_and_void_arms() {
     let directory = TempDir::new("match");
     let source = directory.path().join("match.lift");

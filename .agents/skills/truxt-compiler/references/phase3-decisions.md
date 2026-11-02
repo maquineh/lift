@@ -110,3 +110,33 @@ teste `crates/lift_sema/tests/array_methods_contract.rs`.
   inicial. Liveness conservadora; clones internos não viram moves.
 - Testes: semântica (tipos, clone do receptor, encadeamento, captures, rejeições),
   codegen (pontes de iterator) e E2E check/build/run do exemplo.
+## Enums nominais v2
+
+Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
+`crates/lift_sema/tests/enum_contract.rs`.
+
+- Sintaxe `enum Nome { Variante, Variante(Tipo, Tipo) }` com payloads posicionais
+  opcionais; vírgulas entre variantes e trailing comma são opcionais. Lexer
+  reserva `enum`; o parser preserva spans por variante.
+- HIR `HirDeclaration::Enum`, `HirEnum`/`HirEnumVariant`; expressão
+  `HirExprKind::EnumConstruct`; pattern `HirMatchPattern::EnumVariant` com
+  bindings posicionais. Representação interna usa `ResolvedType::Struct(nome)`
+  com um mapa `enums` separado, evitando mudar todos os consumidores de tipo.
+- Tipos: enum é tipo de valor (Clone/Debug/PartialEq no Rust), usável em arrays,
+  parâmetros, retornos, Option/Result e igualdade. Restrições iniciais: enum não
+  pode ser campo de interface/externo, payload de variante não pode conter outro
+  enum (sem recursão), recurso, closure ou DbValue; FFI rejeita enums.
+- Construção `Enum.Variant(args)` valida aridade/tipos e materializa payloads
+  owned. `Enum.Variant` sem payload é valor direto; variante com payload sem
+  chamada é erro. Nomes de enum são resolvidos antes de funções (forward refs.).
+- Match: pattern qualificado `Enum.Variant(bindings)`; contagem de bindings igual
+  à de payloads; nome do enum precisa coincidir; exaustividade exige todas as
+  variantes; duplicata/ausente/desconhecida é `sema.InvalidMatch`. Bindings são
+  Const (campos mutáveis via `mut` no pattern Rust). Scrutinee clonado quando
+  place; match garante retorno se todos os braços saem.
+- Codegen emite `#[derive(Clone, Debug, PartialEq)] enum` com nomes mangle
+  (`__lift_type_*`/`__lift_variant_*`), construtores `Tipo::Variante(...)` e
+  patterns `Tipo::Variante(bind...)`. Packages qualificam nome do enum e tipos
+  dos campos; módulos flat compartilham os enums do pacote.
+- Testes: parser (declaração/patterns/rejeições), semântica (tipos, construtor,
+  exaustividade, limites, igualdade, option flow), codegen e E2E check/build/run.

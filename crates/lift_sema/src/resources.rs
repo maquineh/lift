@@ -12,6 +12,10 @@ pub(crate) fn uses_db_runtime(program: &HirProgram) -> bool {
         .iter()
         .any(|declaration| match declaration {
             HirDeclaration::Struct(s) => s.fields.iter().any(|f| f.ty.needs_db_runtime()),
+            HirDeclaration::Enum(e) => e
+                .variants
+                .iter()
+                .any(|variant| variant.fields.iter().any(ResolvedType::needs_db_runtime)),
             HirDeclaration::ExternStruct(s) => s.fields.iter().any(|f| f.ty.needs_db_runtime()),
             HirDeclaration::Function(f) => {
                 f.return_type.needs_db_runtime()
@@ -93,6 +97,7 @@ fn expression_uses_db(expression: &HirExpr) -> bool {
         HirExprKind::ClosureCall { callee, arguments } => {
             expression_uses_db(callee) || arguments.iter().any(expression_uses_db)
         }
+        HirExprKind::EnumConstruct { fields, .. } => fields.iter().any(expression_uses_db),
         HirExprKind::ArrayMethod {
             array,
             callback,

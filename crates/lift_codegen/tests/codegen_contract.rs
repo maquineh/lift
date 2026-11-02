@@ -136,6 +136,33 @@ fn emits_external_layout_assertions_and_option_struct_ffi_conversions() {
 }
 
 #[test]
+fn emits_enums_and_qualified_match_patterns() {
+    let rust = emit_rust(&lower(
+        r#"
+        enum Shape { Circle(number), Rect(number, number), Empty }
+        function area(shape: Shape): number {
+            match shape {
+                Shape.Circle(radius) => { return 3.14 * radius * radius; }
+                Shape.Rect(width, height) => { return width * height; }
+                Shape.Empty => { return 0.0; }
+            }
+        }
+        const value: Shape = Shape.Circle(2.0);
+        console.log(area(value));
+        "#,
+    ));
+    assert!(
+        rust.contains("#[derive(Clone, Debug, PartialEq)]"),
+        "{rust}"
+    );
+    assert!(rust.contains("enum __lift_type_"), "{rust}");
+    assert!(rust.contains("__lift_variant_"), "{rust}");
+    assert!(rust.contains("match "), "{rust}");
+    assert!(rust.contains("::__lift_variant_"), "{rust}");
+    assert!(rust.contains("(f64)"), "{rust}");
+}
+
+#[test]
 fn emits_exhaustive_matches_for_option_and_result() {
     let rust = emit_rust(&lower(
         r#"

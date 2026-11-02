@@ -56,7 +56,7 @@ está em `modules-decisions.md`. Os demais contratos estão em `codegen-cli-deci
 O incremento atual exige Rust/Cargo 1.94.1+ e acrescenta métodos nominais/impl,
 closures locais com captura snapshot e templates primitivos contextuais. Consulte
 `methods-closures-templates-decisions.md` para os contratos, diferenças em relação
-ao TypeScript e limites de ownership; o incremento higher-order posterior tornou callbacks valores de primeira classe em parâmetro/retorno (ver `methods-closures-templates-decisions.md`). `while` e `for...of` com `break`/`continue` estão descritos em `docs/loops*.md`; um laço não conta como retorno garantido.
+ao TypeScript e limites de ownership; o incremento higher-order posterior tornou callbacks valores de primeira classe em parâmetro/retorno (ver `methods-closures-templates-decisions.md`). `while` e `for...of` com `break`/`continue` estão descritos em `docs/loops*.md`; um laço não conta como retorno garantido. Enums nominais com payloads e match de variantes estão em `docs/enums*.md`.
 
 ## Pipelines
 

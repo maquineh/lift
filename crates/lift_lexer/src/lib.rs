@@ -119,6 +119,8 @@ pub enum Token {
     From,
     #[token("interface")]
     Interface,
+    #[token("enum")]
+    Enum,
     #[token("const")]
     Const,
     #[token("let")]

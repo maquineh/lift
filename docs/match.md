@@ -2,7 +2,7 @@
 
 [Português do Brasil](match.pt-BR.md) · [User guide](../README.md)
 
-`match` inspects an `Option<T>` or `Result<T, E>` and runs exactly one arm. Both variants must be present, so an accepted `match` is exhaustive.
+`match` inspects an `Option<T>`, a `Result<T, E>`, or a nominal enum and runs exactly one arm. For `Option`/`Result` both variants must be present, and for an enum every variant must be present, so an accepted `match` is exhaustive.
 
 ```lift
 function describe(value: int?): string {
@@ -49,16 +49,24 @@ match expressão {
 }
 ```
 
+```text
+match shape {
+    Shape.Circle(radius) => { ... }
+    Shape.Rect(width, height) => { ... }
+    Shape.Empty => { ... }
+}
+```
+
 - Arms use `=>` followed by a block. Arms are separated by whitespace or an optional comma; there is no fallthrough.
 - `some(nome)` and `err(nome)` require a binding name; `none` has no parentheses.
 - `ok(nome)` binds the success payload, and `ok()` is only valid when the success type is `void` (as in `Result<void, E>`). Using the wrong form is rejected.
 - The binding is a new immutable value scoped to that arm. Its fields can be mutated (`mut` is emitted in the generated pattern), but the binding itself cannot be reassigned. Prefix the name with `_` if the payload is intentionally ignored.
 - Lift has no wildcard, guard, literal, nested, or multiple patterns here; exactly one `some` and one `none`, or one `ok` and one `err`, is required. Duplicate or missing arms are errors (`sema.InvalidMatch`).
-- `match` is a statement; arms produce no value. Use `return` or assign inside an arm.
+- Enum patterns are qualified and bind payloads positionally; the binding count must match the variant. `match` is a statement; arms produce no value. Use `return` or assign inside an arm.
 
 ## Evaluation and value semantics
 
-- The scrutinee is evaluated once. If it is a place, it is cloned before matching, so the original optional/result remains available and later mutations are not observed by the match.
+- The scrutinee is evaluated once. If it is a place, it is cloned before matching, so the original optional/result/enum remains available and later mutations are not observed by the match.
 - The payload is an owned value taken from that clone; it is not borrowed.
 - Matching a `Result<T, E>` that contains an opaque resource is rejected: use `?` or `unwrap`/`unwrap_err` for resource results. Arrays of closures/resources remain unavailable as payloads by their own contracts.
 - The generated Rust is a `match` over `Option`/`Result` with the arm patterns; the binding uses the same owned-value rules as other Lift bindings.
@@ -84,8 +92,9 @@ Rejected before code generation:
 
 ## Limits
 
-- Only `Option` and `Result` can be matched; there are no user unions/enums, primitive matching, or general pattern syntax yet.
+- Enum arms must cover every variant with a qualified `Enum.Variant(...)` pattern; the enum name and binding count are checked. Enums are described in [the enum contract](enums.md).
+- `Option`, `Result`, and nominal enums can be matched; there is no primitive matching, wildcard, guard, nested pattern, or TypeScript `type A = B | C` union syntax yet.
 - No `match` expression value, guards, `or` patterns, nested payload patterns, or `_` wildcard arm (ignore a payload with a `_`-prefixed binding instead).
 - No resource payload matching, no mutation of the binding itself, and no `match` as a constant/initializer expression.
 
-Parser, semantic, codegen, and CLI tests cover exhaustiveness, duplicate/incompatible patterns, `void` success, clone semantics, field mutation, return guarantees, loop control, throw in arms, and native execution of [`examples/match.lift`](../examples/match.lift).
+Parser, semantic, codegen, and CLI tests cover exhaustiveness for `Option`/`Result`/enums, duplicate/incompatible patterns, `void` success, clone semantics, field mutation, return guarantees, loop control, throw in arms, and native execution of [`examples/match.lift`](../examples/match.lift) and [`examples/enums.lift`](../examples/enums.lift).

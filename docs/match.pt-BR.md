@@ -2,7 +2,7 @@
 
 [English](match.md) · [Guia de uso](../README.pt-BR.md)
 
-`match` inspeciona um `Option<T>` ou `Result<T, E>` e executa exatamente um braço. As duas variantes precisam estar presentes, então um `match` aceito é exaustivo.
+`match` inspeciona um `Option<T>`, um `Result<T, E>` ou um enum nominal e executa exatamente um braço. Para `Option`/`Result` as duas variantes precisam estar presentes; para enum, toda variante precisa estar presente, então um `match` aceito é exaustivo.
 
 ```lift
 function describe(value: int?): string {
@@ -54,11 +54,18 @@ match expressão {
 - `ok(nome)` liga o payload de sucesso, e `ok()` só vale quando o sucesso é `void` (como em `Result<void, E>`). Usar a forma errada é rejeitado.
 - O binding é um valor novo imutável com escopo no braço. Campos podem ser mutados (`mut` é emitido no pattern Rust), mas o binding em si não pode ser reatribuído. Prefixe com `_` se o payload for ignorado de propósito.
 - Lift não tem wildcard, guard, literal, pattern aninhado ou múltiplos patterns aqui; exatamente um `some` e um `none`, ou um `ok` e um `err`, é obrigatório. Braço duplicado ou ausente é erro (`sema.InvalidMatch`).
-- `match` é statement; braços não produzem valor. Use `return` ou atribuição dentro do braço.
+- Patterns de enum são qualificados e ligam payloads posicionalmente; a contagem de bindings precisa coincidir com a variante. `match` é statement; braços não produzem valor. Use `return` ou atribuição dentro do braço.
 
+```text
+match shape {
+    Shape.Circle(radius) => { ... }
+    Shape.Rect(width, height) => { ... }
+    Shape.Empty => { ... }
+}
+```
 ## Avaliação e semântica de valor
 
-- O scrutinee é avaliado uma vez. Se for um place, é clonado antes do match, então o opcional/result original continua disponível e mutações posteriores não são observadas pelo match.
+- O scrutinee é avaliado uma vez. Se for um place, é clonado antes do match, então o opcional/result/enum original continua disponível e mutações posteriores não são observadas pelo match.
 - O payload é um valor owned retirado desse clone; não é emprestado.
 - Fazer match de `Result<T, E>` que contém recurso opaco é rejeitado: use `?` ou `unwrap`/`unwrap_err` para Results com recurso. Arrays de closures/recursos continuam indisponíveis como payloads pelos próprios contratos.
 - O Rust gerado é um `match` sobre `Option`/`Result` com os patterns dos braços; o binding segue as mesmas regras de valor owned dos demais bindings Lift.
@@ -84,8 +91,9 @@ Rejeitados antes do codegen:
 
 ## Limites
 
-- Apenas `Option` e `Result` podem ser alvo; ainda não há unions/enums de usuário, match de primitivos ou sintaxe geral de patterns.
+- Braços de enum precisam cobrir toda variante com pattern qualificado `Enum.Variant(...)`; nome do enum e contagem de bindings são checados. Enums estão em [o contrato de enums](enums.pt-BR.md).
+- `Option`, `Result` e enums nominais podem ser alvo; ainda não há match de primitivos, wildcard, guarda, pattern aninhado ou sintaxe de union TypeScript `type A = B | C`.
 - Sem valor de expressão `match`, guardas, patterns `or`, patterns aninhados de payload ou braço wildcard `_` (ignore um payload com binding prefixado por `_`).
 - Sem match de payload com recurso, sem mutação do próprio binding e sem `match` como expressão constante/inicializador.
 
-Testes de parser, semântica, codegen e CLI cobrem exaustividade, patterns duplicados/incompatíveis, sucesso `void`, semântica de clone, mutação de campo, garantia de retorno, controle de laço, throw em braços e execução nativa de [`examples/match.lift`](../examples/match.lift).
+Testes de parser, semântica, codegen e CLI cobrem exaustividade para `Option`/`Result`/enums, patterns duplicados/incompatíveis, sucesso `void`, semântica de clone, mutação de campo, garantia de retorno, controle de laço, throw em braços e execução nativa de [`examples/match.lift`](../examples/match.lift) e [`examples/enums.lift`](../examples/enums.lift).

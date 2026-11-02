@@ -30,6 +30,8 @@ impl ProgramAst {
 pub enum Declaration {
     Impl(ImplDeclaration),
     Interface(InterfaceDeclaration),
+    /// Enum nominal com variantes posicionais e payloads owned.
+    Enum(EnumDeclaration),
     Function(FunctionDeclaration),
     Import(ImportFunctionDeclaration),
     /// Interface externa mapeada para um tipo Rust declarado em outra crate.
@@ -46,6 +48,7 @@ impl Declaration {
         match self {
             Self::Impl(node) => node.span,
             Self::Interface(node) => node.span,
+            Self::Enum(node) => node.span,
             Self::Function(node) => node.span,
             Self::Import(node) => node.span,
             Self::ImportInterface(node) => node.span,
@@ -125,6 +128,20 @@ pub struct ImportInterfaceDeclaration {
     pub fields: Vec<InterfaceField>,
     pub source: String,
     pub source_span: Span,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumDeclaration {
+    pub name: Identifier,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnumVariant {
+    pub name: Identifier,
+    pub fields: Vec<TypeExpression>,
     pub span: Span,
 }
 
@@ -276,6 +293,12 @@ pub enum MatchPatternKind {
     Ok(Option<Identifier>),
     /// `err(nome)`.
     Err(Identifier),
+    /// `Enum.Variant` ou `Enum.Variant(nome, ...)`.
+    EnumVariant {
+        enum_name: Identifier,
+        variant: Identifier,
+        bindings: Vec<Identifier>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

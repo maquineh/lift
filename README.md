@@ -206,7 +206,7 @@ const total = values.reduce(0, (accumulator: int, value: int): int => accumulato
 
 The receiver is copied once, so the source array is never consumed or mutated; each element reaches the callback as an owned value. `map` and `filter` return new arrays, `find` returns `T?`, `some`/`every` short-circuit, `forEach` returns `void`, and `reduce` is a left fold whose accumulator type comes from the initial value. Callbacks can be closures or named function values, and calls chain. An unknown method, a callback with the wrong parameter/result type, a wrong argument count, `find` on `T?[]`, or a non-array receiver is rejected before code generation. There are no `flatMap`, `sort`, index parameters, lazy iterators, or mutating methods like `push`. See [array methods](docs/array-methods.md).
 
-## Matching Option and Result
+## Matching Option, Result, and enums
 
 `match` runs exactly one arm for an `Option<T>` or `Result<T, E>`, and both variants are required:
 
@@ -226,7 +226,31 @@ function describe_result(value: Result<int, string>): string {
 }
 ```
 
-The scrutinee is evaluated once and cloned when it is a place, so the original value remains usable. `some`/`err` bind an owned payload; `ok()` is the `void`-success form. Arm bindings are immutable (fields can be mutated), and a missing or duplicate arm is rejected. A match guarantees a return when every arm exits, and `break`/`continue` inside an arm target the enclosing loop. Matching a `Result` with an opaque resource is rejected; use `?`/`unwrap`. There is no wildcard, guard, nested pattern, or general union/enum matching yet. See [matching Option and Result](docs/match.md).
+The scrutinee is evaluated once and cloned when it is a place, so the original value remains usable. `some`/`err` bind an owned payload; `ok()` is the `void`-success form. Arm bindings are immutable (fields can be mutated), and a missing or duplicate arm is rejected. A match guarantees a return when every arm exits, and `break`/`continue` inside an arm target the enclosing loop. Matching a `Result` with an opaque resource is rejected; use `?`/`unwrap`. Nominal enums are matched with qualified variant patterns; wildcards, guards, nested patterns, and TypeScript union types are not implemented. See [matching](docs/match.md).
+
+## Enums
+
+Enums are nominal tagged unions with positional payloads:
+
+```lift
+enum Shape {
+    Circle(number),
+    Rect(number, number),
+    Empty,
+}
+
+function area(shape: Shape): number {
+    match shape {
+        Shape.Circle(radius) => { return 3.14 * radius * radius; }
+        Shape.Rect(width, height) => { return width * height; }
+        Shape.Empty => { return 0.0; }
+    }
+}
+
+const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
+```
+
+A variant is constructed with `Shape.Circle(2.0)` and a payload-less variant with `Shape.Empty`; payload argument count and types are checked. Enums are value types with structural equality, usable in arrays, parameters, returns, and `Option`/`Result` payloads. Matching requires exactly one arm per variant and binds payloads positionally; missing/duplicate/unknown variants are rejected. Enums cannot be interface fields, FFI parameters/returns, or contain other enums/recursive payloads yet; there are no named-field variants, explicit discriminants, or TypeScript `type A = B | C` unions. See [enums](docs/enums.md).
 
 ## Optional values
 
@@ -281,7 +305,8 @@ The resulting file contains `Hello from stdin|sample`. The same program reads st
 - Result values use contextual `result.ok`/`result.err` constructors, `?`/`throw` propagation with exact error-type matching, and typed `try`/`catch`; `finally`, multiple catches, general pattern matching beyond `Option`/`Result`, and automatic `From` conversion are not implemented.
 - Loops cover `while` and `for...of` over arrays with `break`/`continue`; C-style `for`, labels, ranges, iterator protocol, and loop expressions are not implemented.
 - Array methods cover `map`, `filter`, `find`, `some`, `every`, `forEach`, and `reduce`; `flatMap`, `sort`, index parameters, lazy iterators, and mutating methods such as `push` are not implemented.
-- Matching is limited to `Option`/`Result`; wildcards, guards, nested patterns, and user unions/enums are not implemented.
+- Matching covers `Option`/`Result` and nominal enums; wildcards, guards, nested patterns, and TypeScript union types are not implemented.
+- Enums use positional payloads only; named-field variants, recursive enums, enums in interfaces/FFI, explicit discriminants, and methods on enums are not implemented.
 - The [local notes service](examples/notes-service/README.md) defines DTOs, synchronous handlers, static routes and SQL in Lift. The [database API](stdlib/lift_db/README.md) provides configurable SQLite/PostgreSQL pools, parameterized execute/query, materialized rows and owned transactions. The server owns the pool and handlers borrow it.
 
 The service exercises the documented SQL/scalar and static HTTP contracts. See the [database compatibility plan](docs/database-compatibility.md) for the backend/version matrix and the [callback/HTTP contract](docs/callbacks-and-web-contract.md) for adapter limits.
@@ -304,6 +329,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/loops.lift` — `for...of`, `while`, `break`/`continue`, loop scoping, and iteration over arrays.
 - `examples/array-methods.lift` — `map`, `filter`, `find`, `some`, `every`, `forEach`, `reduce`, chaining, and callbacks.
 - `examples/match.lift` — exhaustive `match` for `Option`, `Result`, `void` success, and loop control inside arms.
+- `examples/enums.lift` — nominal enums with positional payloads, exhaustive variant match, equality, and arrays of enums.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

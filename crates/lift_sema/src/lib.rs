@@ -168,6 +168,8 @@ pub struct HirProgram {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HirDeclaration {
     Struct(HirStruct),
+    /// Enum nominal com variantes posicionais e payloads owned.
+    Enum(HirEnum),
     /// Tipo externo validado; o codegen não gera `struct`, só asserções de layout.
     /// PT-BR: tipo externo, sem geração de struct.
     ExternStruct(HirExternStruct),
@@ -210,6 +212,20 @@ pub const OPTION_UNWRAP_BUILTIN: &str = "option.unwrap";
 pub struct HirStruct {
     pub name: String,
     pub fields: Vec<HirStructField>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirEnum {
+    pub name: String,
+    pub variants: Vec<HirEnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirEnumVariant {
+    pub name: String,
+    pub fields: Vec<ResolvedType>,
     pub span: Span,
 }
 
@@ -423,6 +439,12 @@ pub enum HirMatchPattern {
     /// `None` representa `ok()` para sucesso `void`.
     Ok(Option<HirMatchBinding>),
     Err(HirMatchBinding),
+    /// `Enum.Variant(binding, ...)`; bindings posicionais, um por campo.
+    EnumVariant {
+        enum_name: String,
+        variant: String,
+        bindings: Vec<HirMatchBinding>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -513,6 +535,12 @@ pub enum HirExprKind {
         array: Box<HirExpr>,
         callback: Box<HirExpr>,
         initial: Option<Box<HirExpr>>,
+    },
+    /// `Enum.Variant(arg, ...)` ou `Enum.Variant` sem payload.
+    EnumConstruct {
+        enum_name: String,
+        variant: String,
+        fields: Vec<HirExpr>,
     },
     IntegerLiteral(i64),
     NumberLiteral(f64),

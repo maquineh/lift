@@ -120,6 +120,15 @@ impl Visitor {
                             self.bindings
                                 .push((binding.id, binding.name.clone(), binding.span));
                         }
+                        lift_sema::HirMatchPattern::EnumVariant { bindings, .. } => {
+                            for binding in bindings {
+                                self.bindings.push((
+                                    binding.id,
+                                    binding.name.clone(),
+                                    binding.span,
+                                ));
+                            }
+                        }
                         lift_sema::HirMatchPattern::None | lift_sema::HirMatchPattern::Ok(None) => {
                         }
                     }
@@ -196,6 +205,11 @@ impl Visitor {
                 self.expression(callback);
                 if let Some(initial) = initial {
                     self.expression(initial);
+                }
+            }
+            HirExprKind::EnumConstruct { fields, .. } => {
+                for field in fields {
+                    self.expression(field);
                 }
             }
             HirExprKind::OptionSome(value)

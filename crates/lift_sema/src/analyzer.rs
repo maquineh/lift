@@ -14,13 +14,13 @@ use lift_ast::{
 use crate::{
     ArgPassMode, ArrayMethodKind, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode,
     HirAssignment, HirBlock, HirBreak, HirCallArgument, HirContinue, HirDeclaration, HirElseBranch,
-    HirExpr, HirExprKind, HirExpressionStatement, HirExternStruct, HirForOf, HirFunction, HirIf,
-    HirImport, HirMatch, HirMatchArm, HirMatchBinding, HirMatchPattern, HirNarrowing, HirParameter,
-    HirProgram, HirReturn, HirStatement, HirStruct, HirStructField, HirStructInitField, HirThrow,
-    HirTryCatch, HirVariableDeclaration, HirWhile, LoopId, ParameterPassMode, PropagateTarget,
-    ResolvedType, RustDependency, SemaError, SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN,
-    OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN,
-    RESULT_UNWRAP_ERR_BUILTIN,
+    HirEnum, HirEnumVariant, HirExpr, HirExprKind, HirExpressionStatement, HirExternStruct,
+    HirForOf, HirFunction, HirIf, HirImport, HirMatch, HirMatchArm, HirMatchBinding,
+    HirMatchPattern, HirNarrowing, HirParameter, HirProgram, HirReturn, HirStatement, HirStruct,
+    HirStructField, HirStructInitField, HirThrow, HirTryCatch, HirVariableDeclaration, HirWhile,
+    LoopId, ParameterPassMode, PropagateTarget, ResolvedType, RustDependency, SemaError,
+    SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN, OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN,
+    RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
 };
 
 fn method_name(target: &str, method: &str) -> String {
@@ -168,6 +168,11 @@ fn closure_free_names(closure: &lift_ast::ClosureExpression) -> HashSet<String> 
                             lift_ast::MatchPatternKind::Ok(Some(name)) => {
                                 arm_bound.insert(name.name.clone());
                             }
+                            lift_ast::MatchPatternKind::EnumVariant { bindings, .. } => {
+                                for binding in bindings {
+                                    arm_bound.insert(binding.name.clone());
+                                }
+                            }
                             lift_ast::MatchPatternKind::None
                             | lift_ast::MatchPatternKind::Ok(None) => {}
                         }
@@ -209,6 +214,18 @@ struct StructInfo {
     /// Tipo Rust externo: não gera `struct` e não participa do ciclo de tamanho.
     /// PT-BR: tipo externo; sem geração e sem aresta no grafo de tamanho.
     external: bool,
+}
+
+#[derive(Clone)]
+struct EnumInfo {
+    variants: Vec<EnumVariantInfo>,
+}
+
+#[derive(Clone)]
+struct EnumVariantInfo {
+    name: String,
+    fields: Vec<ResolvedType>,
+    span: Span,
 }
 
 #[derive(Clone)]
@@ -265,8 +282,10 @@ struct NarrowFact {
 struct Analyzer<'ast> {
     ast: &'ast ProgramAst,
     structures: HashMap<String, StructInfo>,
+    enums: HashMap<String, EnumInfo>,
     functions: HashMap<String, FunctionInfo>,
     struct_by_declaration: HashMap<usize, HirStruct>,
+    enum_by_declaration: HashMap<usize, HirEnum>,
     extern_by_declaration: HashMap<usize, HirExternStruct>,
     extern_dependencies: HashMap<String, (RustDependency, Span)>,
     function_by_declaration: HashMap<usize, FunctionInfo>,
@@ -319,8 +338,10 @@ impl<'ast> Analyzer<'ast> {
         Self {
             ast,
             structures: HashMap::new(),
+            enums: HashMap::new(),
             functions: HashMap::new(),
             struct_by_declaration: HashMap::new(),
+            enum_by_declaration: HashMap::new(),
             extern_by_declaration: HashMap::new(),
             extern_dependencies: HashMap::new(),
             function_by_declaration: HashMap::new(),
@@ -368,6 +389,7 @@ impl<'ast> Analyzer<'ast> {
         {
             let mut top_level = BodyChecker::new(
                 &self.structures,
+                &self.enums,
                 &self.functions,
                 &mut self.next_binding_id,
                 &mut self.next_try_id,
@@ -404,6 +426,11 @@ impl<'ast> Analyzer<'ast> {
                 Declaration::Interface(_) => {
                     if let Some(item) = self.struct_by_declaration.get(&index) {
                         declarations.push(HirDeclaration::Struct(item.clone()));
+                    }
+                }
+                Declaration::Enum(_) => {
+                    if let Some(item) = self.enum_by_declaration.get(&index) {
+                        declarations.push(HirDeclaration::Enum(item.clone()));
                     }
                 }
                 Declaration::ImportInterface(_) => {
@@ -464,6 +491,7 @@ impl<'ast> Analyzer<'ast> {
             let name = match declaration {
                 Declaration::Interface(interface) => &interface.name,
                 Declaration::ImportInterface(interface) => &interface.name,
+                Declaration::Enum(enumeration) => &enumeration.name,
                 _ => continue,
             };
             let name_text = name.name.clone();
@@ -499,6 +527,7 @@ impl<'ast> Analyzer<'ast> {
     fn resolve_structs(&mut self) {
         let mut names = HashSet::new();
         let mut extern_names = HashSet::new();
+        let mut enum_names = HashSet::new();
         for declaration in &self.ast.declarations {
             match declaration {
                 Declaration::Interface(interface) => {
@@ -508,6 +537,10 @@ impl<'ast> Analyzer<'ast> {
                     names.insert(interface.name.name.clone());
                     extern_names.insert(interface.name.name.clone());
                 }
+                Declaration::Enum(enumeration) => {
+                    names.insert(enumeration.name.name.clone());
+                    enum_names.insert(enumeration.name.name.clone());
+                }
                 _ => {}
             }
         }
@@ -515,9 +548,13 @@ impl<'ast> Analyzer<'ast> {
         for (index, declaration) in self.ast.declarations.iter().enumerate() {
             match declaration {
                 Declaration::Interface(interface) => {
-                    let Some(fields) =
-                        self.resolve_struct_fields(&interface.fields, &names, &extern_names, false)
-                    else {
+                    let Some(fields) = self.resolve_struct_fields(
+                        &interface.fields,
+                        &names,
+                        &extern_names,
+                        &enum_names,
+                        false,
+                    ) else {
                         continue;
                     };
                     let info = StructInfo {
@@ -536,9 +573,119 @@ impl<'ast> Analyzer<'ast> {
                     );
                 }
                 Declaration::ImportInterface(interface) => {
-                    self.resolve_import_interface(index, interface, &names, &extern_names);
+                    self.resolve_import_interface(
+                        index,
+                        interface,
+                        &names,
+                        &extern_names,
+                        &enum_names,
+                    );
                 }
                 _ => {}
+            }
+        }
+        self.resolve_enums(&names, &enum_names);
+    }
+
+    /// Resolve os payloads das variantes; enums não podem conter enums nesta fase.
+    fn resolve_enums(&mut self, names: &HashSet<String>, enum_names: &HashSet<String>) {
+        for (index, declaration) in self.ast.declarations.iter().enumerate() {
+            let Declaration::Enum(enumeration) = declaration else {
+                continue;
+            };
+            let mut variants = Vec::new();
+            let mut seen = HashMap::<String, Span>::new();
+            let mut valid = true;
+            if enumeration.variants.is_empty() {
+                self.errors.push(SemaError::new(
+                    SemaErrorKind::UnsupportedType,
+                    format!(
+                        "enum `{}` precisa de ao menos uma variante",
+                        enumeration.name.name
+                    ),
+                    enumeration.name.span,
+                ));
+                continue;
+            }
+            for variant in &enumeration.variants {
+                if let Some(previous) = seen.insert(variant.name.name.clone(), variant.name.span) {
+                    self.errors.push(
+                        SemaError::new(
+                            SemaErrorKind::DuplicateDeclaration,
+                            format!(
+                                "variante duplicada `{}` em `{}`",
+                                variant.name.name, enumeration.name.name
+                            ),
+                            variant.name.span,
+                        )
+                        .with_secondary(previous),
+                    );
+                    valid = false;
+                    continue;
+                }
+                let mut fields = Vec::new();
+                for field in &variant.fields {
+                    match resolve_type(field, names, TypePosition::Field) {
+                        Ok(ty) => {
+                            if contains_enum(&ty, enum_names) {
+                                self.errors.push(SemaError::new(
+                                    SemaErrorKind::UnsupportedType,
+                                    "payload de enum não pode conter outro enum nesta fase",
+                                    field.span,
+                                ));
+                                valid = false;
+                            } else if ty.needs_db_runtime() {
+                                self.errors.push(SemaError::new(
+                                    SemaErrorKind::UnsupportedType,
+                                    "payload de enum não pode usar DbValue nem recursos",
+                                    field.span,
+                                ));
+                                valid = false;
+                            } else if !ty.is_value_type() {
+                                self.errors.push(SemaError::new(
+                                    SemaErrorKind::UnsupportedType,
+                                    "payload de enum exige tipo de valor",
+                                    field.span,
+                                ));
+                                valid = false;
+                            } else {
+                                fields.push(ty);
+                            }
+                        }
+                        Err(error) => {
+                            self.errors.push(error);
+                            valid = false;
+                        }
+                    }
+                }
+                variants.push(EnumVariantInfo {
+                    name: variant.name.name.clone(),
+                    fields,
+                    span: variant.span,
+                });
+            }
+            if valid {
+                self.enums.insert(
+                    enumeration.name.name.clone(),
+                    EnumInfo {
+                        variants: variants.clone(),
+                    },
+                );
+                self.enum_by_declaration.insert(
+                    index,
+                    HirEnum {
+                        name: enumeration.name.name.clone(),
+                        variants: variants
+                            .into_iter()
+                            .map(|variant| HirEnumVariant {
+                                name: variant.name,
+                                fields: variant.fields,
+                                span: variant.span,
+                            })
+                            .collect(),
+                        span: enumeration.span,
+                    },
+                );
             }
         }
     }
@@ -550,6 +697,7 @@ impl<'ast> Analyzer<'ast> {
         source: &[lift_ast::InterfaceField],
         names: &HashSet<String>,
         extern_names: &HashSet<String>,
+        enum_names: &HashSet<String>,
         external: bool,
     ) -> Option<Vec<HirStructField>> {
         let mut fields = Vec::new();
@@ -591,6 +739,15 @@ impl<'ast> Analyzer<'ast> {
                             continue;
                         }
                     }
+                    if contains_enum(&ty, enum_names) {
+                        self.errors.push(SemaError::new(
+                            SemaErrorKind::UnsupportedType,
+                            "enum não pode ser campo de interface nesta fase",
+                            field.ty.span,
+                        ));
+                        valid = false;
+                        continue;
+                    }
                     let ty = if field.optional {
                         // `field?: T` é o mesmo tipo Rust de `field: T?`, mas
                         // pode ser omitido no object literal. Um aninhamento
@@ -630,6 +787,7 @@ impl<'ast> Analyzer<'ast> {
         interface: &ImportInterfaceDeclaration,
         names: &HashSet<String>,
         extern_names: &HashSet<String>,
+        enum_names: &HashSet<String>,
     ) {
         let (dependency, rust_path) =
             match crate::interop::resolve_source(&interface.source, interface.source_span) {
@@ -656,7 +814,8 @@ impl<'ast> Analyzer<'ast> {
             self.extern_dependencies
                 .insert(crate_name, (dependency.clone(), interface.source_span));
         }
-        let Some(fields) = self.resolve_struct_fields(&interface.fields, names, extern_names, true)
+        let Some(fields) =
+            self.resolve_struct_fields(&interface.fields, names, extern_names, enum_names, true)
         else {
             return;
         };
@@ -695,6 +854,9 @@ impl<'ast> Analyzer<'ast> {
                 | Declaration::Import(lift_ast::ImportFunctionDeclaration {
                     name: identifier,
                     ..
+                })
+                | Declaration::Enum(lift_ast::EnumDeclaration {
+                    name: identifier, ..
                 }) => {
                     let name = identifier.name.clone();
                     if let Some(previous) = all_names.insert(name.clone(), identifier.span) {
@@ -720,6 +882,7 @@ impl<'ast> Analyzer<'ast> {
             .structures
             .keys()
             .cloned()
+            .chain(self.enums.keys().cloned())
             .chain(["int", "number", "string", "boolean", "void"].map(str::to_owned))
             .collect::<HashSet<_>>();
 
@@ -808,7 +971,12 @@ impl<'ast> Analyzer<'ast> {
     }
 
     fn collect_imports(&mut self) {
-        let names = self.structures.keys().cloned().collect::<HashSet<_>>();
+        let names = self
+            .structures
+            .keys()
+            .cloned()
+            .chain(self.enums.keys().cloned())
+            .collect::<HashSet<_>>();
         let extern_names = self
             .structures
             .iter()
@@ -1037,6 +1205,7 @@ impl<'ast> Analyzer<'ast> {
     ) -> Result<HirFunction, SemaError> {
         let mut checker = BodyChecker::new(
             &self.structures,
+            &self.enums,
             &self.functions,
             &mut self.next_binding_id,
             &mut self.next_try_id,
@@ -1113,6 +1282,7 @@ struct TryContext {
 
 struct BodyChecker<'a> {
     structures: &'a HashMap<String, StructInfo>,
+    enums: &'a HashMap<String, EnumInfo>,
     functions: &'a HashMap<String, FunctionInfo>,
     next_binding_id: &'a mut u32,
     next_try_id: &'a mut u32,
@@ -1127,6 +1297,7 @@ struct BodyChecker<'a> {
 impl<'a> BodyChecker<'a> {
     fn new(
         structures: &'a HashMap<String, StructInfo>,
+        enums: &'a HashMap<String, EnumInfo>,
         functions: &'a HashMap<String, FunctionInfo>,
         next_binding_id: &'a mut u32,
         next_try_id: &'a mut u32,
@@ -1136,6 +1307,7 @@ impl<'a> BodyChecker<'a> {
     ) -> Self {
         Self {
             structures,
+            enums,
             functions,
             next_binding_id,
             next_try_id,
@@ -1981,6 +2153,7 @@ impl<'a> BodyChecker<'a> {
             .structures
             .keys()
             .cloned()
+            .chain(self.enums.keys().cloned())
             .chain(["int", "number", "string", "boolean", "void"].map(str::to_owned))
             .collect::<HashSet<_>>();
         resolve_type(ty, &names, position)
@@ -2207,6 +2380,48 @@ impl<'a> BodyChecker<'a> {
                 ))
             }
             ExpressionKind::FieldAccess(access) => {
+                if let Some(enum_name) = direct_callee_name(&access.object) {
+                    if self.lookup(&enum_name).is_none() {
+                        if let Some(info) = self.enums.get(&enum_name).cloned() {
+                            let variant = info
+                                .variants
+                                .iter()
+                                .find(|variant| variant.name == access.field.name)
+                                .ok_or_else(|| {
+                                    SemaError::new(
+                                        SemaErrorKind::UnknownField,
+                                        format!(
+                                            "enum `{enum_name}` não tem variante `{}`",
+                                            access.field.name
+                                        ),
+                                        access.field.span,
+                                    )
+                                })?;
+                            if !variant.fields.is_empty() {
+                                return Err(SemaError::new(
+                                    SemaErrorKind::ArgumentCountMismatch,
+                                    format!(
+                                        "variante `{enum_name}.{}` exige {} payload(s); use `{enum_name}.{}(...)`",
+                                        access.field.name,
+                                        variant.fields.len(),
+                                        access.field.name
+                                    ),
+                                    expression.span,
+                                ));
+                            }
+                            let ty = ResolvedType::Struct(enum_name.clone());
+                            return Ok(self.expr(
+                                HirExprKind::EnumConstruct {
+                                    enum_name,
+                                    variant: access.field.name.clone(),
+                                    fields: Vec::new(),
+                                },
+                                ty,
+                                expression.span,
+                            ));
+                        }
+                    }
+                }
                 let object = self.synthesize_expr(&access.object)?;
                 let ResolvedType::Struct(name) = &object.ty else {
                     return Err(SemaError::new(
@@ -2465,13 +2680,26 @@ impl<'a> BodyChecker<'a> {
                 statement.value.span,
             ));
         }
+        let enum_case = match &value.ty {
+            ResolvedType::Struct(name) => self
+                .enums
+                .get(name)
+                .cloned()
+                .map(|info| (name.clone(), info.variants)),
+            _ => None,
+        };
+        if let Some((name, variants)) = enum_case {
+            return self.check_enum_match(statement, value, name, variants);
+        }
         let (payload, error) = match value.ty.clone() {
             ResolvedType::Optional(payload) => ((*payload).clone(), None),
             ResolvedType::Result(ok, error) => ((*ok).clone(), Some((*error).clone())),
             other => {
                 return Err(SemaError::new(
                     SemaErrorKind::TypeMismatch,
-                    format!("`match` exige `Option<T>` ou `Result<T, E>`, recebido `{other}`"),
+                    format!(
+                        "`match` exige `Option<T>`, `Result<T, E>` ou enum, recebido `{other}`"
+                    ),
                     statement.value.span,
                 ));
             }
@@ -2609,6 +2837,188 @@ impl<'a> BodyChecker<'a> {
             arms,
             span: statement.span,
         }))
+    }
+
+    /// `match` exaustivo de um enum nominal com payloads posicionais.
+    fn check_enum_match(
+        &mut self,
+        statement: &lift_ast::MatchStatement,
+        value: HirExpr,
+        enum_name: String,
+        variants: Vec<EnumVariantInfo>,
+    ) -> Result<HirStatement, SemaError> {
+        let value = self.materialize_owned(value, false);
+        let mut seen = HashSet::new();
+        let mut arms = Vec::new();
+        for arm in &statement.arms {
+            let (variant_name, binding_names) = match &arm.pattern.kind {
+                lift_ast::MatchPatternKind::EnumVariant {
+                    enum_name: pattern_enum,
+                    variant,
+                    bindings,
+                } => {
+                    if pattern_enum.name != enum_name {
+                        return Err(SemaError::new(
+                            SemaErrorKind::InvalidMatch,
+                            format!(
+                                "braço usa enum `{}`, mas o valor é `{enum_name}`",
+                                pattern_enum.name
+                            ),
+                            arm.pattern.span,
+                        ));
+                    }
+                    (variant.name.clone(), bindings)
+                }
+                _ => {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidMatch,
+                        format!("padrão incompatível com o enum `{enum_name}`"),
+                        arm.pattern.span,
+                    ));
+                }
+            };
+            let variant = variants
+                .iter()
+                .find(|variant| variant.name == variant_name)
+                .ok_or_else(|| {
+                    SemaError::new(
+                        SemaErrorKind::InvalidMatch,
+                        format!("enum `{enum_name}` não tem variante `{variant_name}`"),
+                        arm.pattern.span,
+                    )
+                })?;
+            if binding_names.len() != variant.fields.len() {
+                return Err(SemaError::new(
+                    SemaErrorKind::InvalidMatch,
+                    format!(
+                        "variante `{enum_name}.{variant_name}` espera {} binding(s), recebeu {}",
+                        variant.fields.len(),
+                        binding_names.len()
+                    ),
+                    arm.pattern.span,
+                ));
+            }
+            if !seen.insert(variant_name.clone()) {
+                return Err(SemaError::new(
+                    SemaErrorKind::InvalidMatch,
+                    format!("braço `{enum_name}.{variant_name}` duplicado no `match`"),
+                    arm.pattern.span,
+                ));
+            }
+            self.scopes.push(HashMap::new());
+            let checked = (|| {
+                let mut bindings = Vec::new();
+                for (name, ty) in binding_names.iter().zip(&variant.fields) {
+                    let id = self.fresh_binding_id();
+                    self.declare(
+                        &name.name,
+                        BindingInfo {
+                            id,
+                            ty: ty.clone(),
+                            binding: Some(BindingKind::Const),
+                            parameter_mode: None,
+                            parameter_mutated: false,
+                            narrowed: false,
+                            span: name.span,
+                        },
+                    )?;
+                    bindings.push((id, name.name.clone(), ty.clone()));
+                }
+                self.check_block(&arm.body, true)
+                    .map(|body| (bindings, body))
+            })();
+            self.scopes.pop();
+            let (bindings, body) = checked?;
+            let bindings = bindings
+                .into_iter()
+                .map(|(id, name, ty)| HirMatchBinding {
+                    id,
+                    name,
+                    ty,
+                    requires_mut: self.mutable_bindings.contains(&id),
+                    span: arm.pattern.span,
+                })
+                .collect();
+            arms.push(HirMatchArm {
+                pattern: HirMatchPattern::EnumVariant {
+                    enum_name: enum_name.clone(),
+                    variant: variant_name,
+                    bindings,
+                },
+                body,
+                span: arm.span,
+            });
+        }
+        for variant in &variants {
+            if !seen.contains(&variant.name) {
+                return Err(SemaError::new(
+                    SemaErrorKind::InvalidMatch,
+                    format!(
+                        "`match` não é exaustivo: falta o braço `{enum_name}.{}`",
+                        variant.name
+                    ),
+                    statement.span,
+                ));
+            }
+        }
+        Ok(HirStatement::Match(HirMatch {
+            value,
+            arms,
+            span: statement.span,
+        }))
+    }
+
+    /// `Enum.Variant(payload...)`: valida aridade/tipos e materializa os campos.
+    fn check_enum_constructor(
+        &mut self,
+        span: Span,
+        enum_name: &str,
+        variant_name: &str,
+        call: &lift_ast::CallExpression,
+    ) -> Result<HirExpr, SemaError> {
+        let info = self.enums.get(enum_name).cloned().ok_or_else(|| {
+            SemaError::new(
+                SemaErrorKind::UnknownType,
+                format!("enum `{enum_name}` não foi declarado"),
+                call.callee.span,
+            )
+        })?;
+        let variant = info
+            .variants
+            .iter()
+            .find(|variant| variant.name == variant_name)
+            .ok_or_else(|| {
+                SemaError::new(
+                    SemaErrorKind::UnknownField,
+                    format!("enum `{enum_name}` não tem variante `{variant_name}`"),
+                    call.callee.span,
+                )
+            })?;
+        if call.arguments.len() != variant.fields.len() {
+            return Err(SemaError::new(
+                SemaErrorKind::ArgumentCountMismatch,
+                format!(
+                    "variante `{enum_name}.{variant_name}` espera {} payload(s), recebeu {}",
+                    variant.fields.len(),
+                    call.arguments.len()
+                ),
+                span,
+            ));
+        }
+        let mut fields = Vec::with_capacity(call.arguments.len());
+        for (argument, ty) in call.arguments.iter().zip(&variant.fields) {
+            let value = self.check_expr(argument, ty)?;
+            fields.push(self.materialize_owned(value, false));
+        }
+        Ok(self.expr(
+            HirExprKind::EnumConstruct {
+                enum_name: enum_name.to_owned(),
+                variant: variant_name.to_owned(),
+                fields,
+            },
+            ResolvedType::Struct(enum_name.to_owned()),
+            span,
+        ))
     }
 
     /// Métodos higher-order de array (`map`, `filter`, `forEach`, `find`,
@@ -3002,6 +3412,7 @@ impl<'a> BodyChecker<'a> {
         }
         let mut checker = BodyChecker::new(
             self.structures,
+            self.enums,
             self.functions,
             self.next_binding_id,
             self.next_try_id,
@@ -3348,6 +3759,11 @@ impl<'a> BodyChecker<'a> {
             }
         }
         if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
+            if let Some(enum_name) = direct_callee_name(&access.object) {
+                if self.lookup(&enum_name).is_none() && self.enums.contains_key(&enum_name) {
+                    return self.check_enum_constructor(span, &enum_name, &access.field.name, call);
+                }
+            }
             let receiver = self.synthesize_expr(&access.object)?;
             if let ResolvedType::Array(element) = receiver.ty.clone() {
                 return self.check_array_method(span, &access.field.name, receiver, *element, call);
@@ -3962,6 +4378,23 @@ enum TypePosition {
     Variable,
 }
 
+fn contains_enum(ty: &ResolvedType, enum_names: &HashSet<String>) -> bool {
+    match ty {
+        ResolvedType::Struct(name) => enum_names.contains(name),
+        ResolvedType::Array(element) | ResolvedType::Optional(element) => {
+            contains_enum(element, enum_names)
+        }
+        ResolvedType::Result(ok, error) => {
+            contains_enum(ok, enum_names) || contains_enum(error, enum_names)
+        }
+        ResolvedType::Closure(parameters, result) => {
+            parameters.iter().any(|ty| contains_enum(ty, enum_names))
+                || contains_enum(result, enum_names)
+        }
+        _ => false,
+    }
+}
+
 fn resolve_type(
     expression: &TypeExpression,
     known_structs: &HashSet<String>,
@@ -4239,6 +4672,11 @@ fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<Bin
                 collect_nested_mut_borrow_roots(initial, roots);
             }
         }
+        HirExprKind::EnumConstruct { fields, .. } => {
+            for field in fields {
+                collect_nested_mut_borrow_roots(field, roots);
+            }
+        }
         HirExprKind::FunctionValue { .. } => {}
 
         HirExprKind::OptionNone => {}
@@ -4318,6 +4756,7 @@ fn hir_contains_call(expression: &HirExpr) -> bool {
                 || hir_contains_call(callback)
                 || initial.as_deref().is_some_and(hir_contains_call)
         }
+        HirExprKind::EnumConstruct { fields, .. } => fields.iter().any(hir_contains_call),
         HirExprKind::FunctionValue { .. } => false,
         HirExprKind::OptionNone => false,
         HirExprKind::OptionSome(payload) => hir_contains_call(payload),
@@ -4377,6 +4816,11 @@ fn collect_hir_binding_uses(expression: &HirExpr, uses: &mut HashSet<BindingId>)
             collect_hir_binding_uses(callback, uses);
             if let Some(initial) = initial {
                 collect_hir_binding_uses(initial, uses);
+            }
+        }
+        HirExprKind::EnumConstruct { fields, .. } => {
+            for field in fields {
+                collect_hir_binding_uses(field, uses);
             }
         }
         HirExprKind::FunctionValue { .. } => {}
@@ -4916,6 +5360,9 @@ fn statement_mentions_name(statement: &Statement, name: &str) -> bool {
                         lift_ast::MatchPatternKind::Some(binding)
                         | lift_ast::MatchPatternKind::Err(binding) => binding.name == name,
                         lift_ast::MatchPatternKind::Ok(Some(binding)) => binding.name == name,
+                        lift_ast::MatchPatternKind::EnumVariant { bindings, .. } => {
+                            bindings.iter().any(|binding| binding.name == name)
+                        }
                         lift_ast::MatchPatternKind::None | lift_ast::MatchPatternKind::Ok(None) => {
                             false
                         }
@@ -5073,6 +5520,11 @@ fn apply_mutable_binding_flags(declarations: &mut [HirDeclaration], mutable: &Ha
                             HirMatchPattern::Ok(Some(binding)) => {
                                 binding.requires_mut = mutable.contains(&binding.id);
                             }
+                            HirMatchPattern::EnumVariant { bindings, .. } => {
+                                for binding in bindings {
+                                    binding.requires_mut = mutable.contains(&binding.id);
+                                }
+                            }
                             HirMatchPattern::None | HirMatchPattern::Ok(None) => {}
                         }
                         apply_block(&mut arm.body, mutable);
@@ -5115,6 +5567,7 @@ fn apply_mutable_binding_flags(declarations: &mut [HirDeclaration], mutable: &Ha
                 }
             }
             HirDeclaration::Struct(_)
+            | HirDeclaration::Enum(_)
             | HirDeclaration::ExternStruct(_)
             | HirDeclaration::Import(_) => {}
         }

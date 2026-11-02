@@ -235,7 +235,7 @@ impl Graph {
                     for statement in &arm.body.statements {
                         observe_statement(statement, &mut node);
                     }
-                    if let Some(binding) = match_binding(&arm.pattern) {
+                    for binding in match_bindings(&arm.pattern) {
                         node.defs.insert(binding.id);
                     }
                 }
@@ -339,7 +339,7 @@ fn observe_statement(statement: &HirStatement, node: &mut Node) {
                 for statement in &arm.body.statements {
                     observe_statement(statement, node);
                 }
-                if let Some(binding) = match_binding(&arm.pattern) {
+                for binding in match_bindings(&arm.pattern) {
                     *node.occurrences.entry(binding.id).or_default() += 1;
                 }
             }
@@ -395,6 +395,11 @@ fn observe(expression: &HirExpr, node: &mut Node) {
             observe(callback, node);
             if let Some(initial) = initial {
                 observe(initial, node);
+            }
+        }
+        HirExprKind::EnumConstruct { fields, .. } => {
+            for field in fields {
+                observe(field, node);
             }
         }
         HirExprKind::FunctionValue { .. } => {}
@@ -571,13 +576,14 @@ fn rewrite_statement(
     }
 }
 
-fn match_binding(pattern: &crate::HirMatchPattern) -> Option<&crate::HirMatchBinding> {
+fn match_bindings(pattern: &crate::HirMatchPattern) -> Vec<&crate::HirMatchBinding> {
     match pattern {
         crate::HirMatchPattern::Some(binding) | crate::HirMatchPattern::Err(binding) => {
-            Some(binding)
+            vec![binding]
         }
-        crate::HirMatchPattern::Ok(Some(binding)) => Some(binding),
-        crate::HirMatchPattern::None | crate::HirMatchPattern::Ok(None) => None,
+        crate::HirMatchPattern::Ok(Some(binding)) => vec![binding],
+        crate::HirMatchPattern::EnumVariant { bindings, .. } => bindings.iter().collect(),
+        crate::HirMatchPattern::None | crate::HirMatchPattern::Ok(None) => Vec::new(),
     }
 }
 

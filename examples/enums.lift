@@ -1,0 +1,40 @@
+// EN: Nominal enums with positional payloads and exhaustive match.
+// PT-BR: Enums nominais com payloads posicionais e match exaustivo.
+enum Direction { North, East, South, West }
+
+enum Shape { Circle(number), Rect(number, number), Empty }
+
+function area(shape: Shape): number {
+    match shape {
+        Shape.Circle(radius) => { return 3.14 * radius * radius; }
+        Shape.Rect(width, height) => { return width * height; }
+        Shape.Empty => { return 0.0; }
+    }
+}
+
+function turn(direction: Direction): Direction {
+    match direction {
+        Direction.North => { return Direction.East; }
+        Direction.East => { return Direction.South; }
+        Direction.South => { return Direction.West; }
+        Direction.West => { return Direction.North; }
+    }
+}
+
+function describe(shape: Shape): string {
+    match shape {
+        Shape.Circle(radius) => { return `circle ${radius}`; }
+        Shape.Rect(width, height) => { return `rect ${width}x${height}`; }
+        Shape.Empty => { return "empty"; }
+    }
+}
+
+const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
+for (const shape of shapes) {
+    console.log(area(shape));
+    console.log(describe(shape));
+}
+console.log(turn(Direction.North) == Direction.East);
+const copied = Shape.Circle(1.0);
+console.log(copied == Shape.Circle(1.0));
+console.log(copied == Shape.Empty);

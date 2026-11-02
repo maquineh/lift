@@ -81,7 +81,7 @@ The following remain rejected before code generation:
 - `Option` nested inside another `Option`, an array, or a `Result` payload that is itself nested. Only a direct `T?` parameter or return and one direct `Option` inside a `Result` payload are supported.
 - Nested `Result` payloads (`Result<Result<T, E>, E>`), `Option<Result<T, E>>` (`Result<T, E>?`), and `Result` inside an array.
 - `Result<void, E>` as a parameter; `void` succeeds only in return position.
-- Lift-local structs (declared with plain `interface`) in any FFI position, including inside `Option`, `Result`, or arrays. Only `import interface` types cross the FFI.
+- Lift-local structs (declared with plain `interface`) and enums in any FFI position, including inside `Option`, `Result`, or arrays. Only `import interface` types cross the FFI.
 - Callbacks containing `Option`, `Result`, another function type, arrays of callbacks, or opaque resources; a `void` callback parameter; and function types in other FFI payload positions (only a direct parameter/return is a callback).
 - Nested arrays, unions/enums, generics, `unsafe` functions, and raw identifiers.
 

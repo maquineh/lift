@@ -81,7 +81,7 @@ Continuam rejeitados antes do codegen:
 - `Option` aninhado em outro `Option`, array ou payload de `Result` que já esteja aninhado. Só `T?` direto em parâmetro/retorno e um `Option` direto dentro de payload de `Result` são suportados.
 - Payload de `Result` aninhado (`Result<Result<T, E>, E>`), `Option<Result<T, E>>` (`Result<T, E>?`) e `Result` dentro de array.
 - `Result<void, E>` como parâmetro; `void` só tem sucesso em posição de retorno.
-- Structs locais Lift (declaradas com `interface` comum) em qualquer posição FFI, inclusive dentro de `Option`, `Result` ou arrays. Só tipos de `import interface` cruzam a FFI.
+- Structs locais Lift (declaradas com `interface` comum) e enums em qualquer posição FFI, inclusive dentro de `Option`, `Result` ou arrays. Só tipos de `import interface` cruzam a FFI.
 - Callbacks contendo `Option`, `Result`, outro tipo de função, arrays de callbacks ou recursos opacos; parâmetro callback `void`; e tipo de função em outras posições de payload FFI (só parâmetro/retorno direto é callback).
 - Arrays aninhados, unions/enums, generics, funções `unsafe` e raw identifiers.
 
