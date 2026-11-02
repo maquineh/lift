@@ -3,6 +3,7 @@ name = "lift_parser"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "Parser recursivo descendente e Pratt do Lift"
 
 [dependencies]

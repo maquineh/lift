@@ -3,6 +3,7 @@ name = "lift_project"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "Reusable Lift project analysis and source diagnostics"
 
 [dependencies]

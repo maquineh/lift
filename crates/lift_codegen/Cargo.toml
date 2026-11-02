@@ -3,6 +3,7 @@ name = "lift_codegen"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "Geração de Rust e manifests Cargo para o Lift"
 
 [dependencies]
