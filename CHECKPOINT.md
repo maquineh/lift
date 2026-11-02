@@ -67,6 +67,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - [Métodos de array](docs/array-methods.md) / [pt-BR](docs/array-methods.pt-BR.md)
   - [Match de Option/Result](docs/match.md) / [pt-BR](docs/match.pt-BR.md)
   - [Enums](docs/enums.md) / [pt-BR](docs/enums.pt-BR.md)
+  - [Uniões](docs/unions.md) / [pt-BR](docs/unions.pt-BR.md)
 - Matriz de cobertura e pendências: [docs/testing-and-release.md](docs/testing-and-release.md).
 - Mapa de crates, arquivos e exemplos: [docs/source-map.md](docs/source-map.md).
 - Decisões internas: [phase3](.agents/skills/truxt-compiler/references/phase3-decisions.md), [phase4](.agents/skills/truxt-compiler/references/phase4-decisions.md) e [phase5](.agents/skills/truxt-compiler/references/phase5-decisions.md).
@@ -74,7 +75,6 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 
 ## Próximos passos sugeridos
 
-1. **Enums avançados/unions** — concluído (campos nomeados, recursão, interfaces e `type A = B | C`).
-2. **Generics gerais** — containers e funções parametrizadas; maior incremento restante.
-3. **Captures mutáveis/`FnMut`** — hoje acumuladores usam `reduce` ou `for...of` explícito.
-4. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.
+1. **Generics gerais** — containers e funções parametrizadas; próximo incremento, maior restante.
+2. **Captures mutáveis/`FnMut`** — hoje acumuladores usam `reduce` ou `for...of` explícito.
+3. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.
