@@ -155,3 +155,19 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   `Variant { ... }`; igualdade/Clone/Debug continuam derivados.
 - Exemplo `examples/enum-fields.lift`, testes de parser/sema/codegen/E2E e docs
   `docs/enums*.md`.
+### Recursão por Box e enums em interfaces
+
+- Enums em campos de interface passaram a ser aceitos. `resolve_struct_fields`
+  não rejeita mais `Struct(enum)`, e o codegen usa o tipo inline normalmente.
+- Payloads de variante que alcançam um enum (direto, via `Option`/`Result` ou via
+  campos de interface transitivos) recebem `field_boxed`/`boxed` no HIR. O
+  codegen gera `Box<T>` no enum Rust, envolve a construção em `Box::new(...)` e,
+  no match, liga um temporário `__lift_box_N` e copia `*temporário` para o
+  binding Lif (com `mut` quando necessário).
+- Arrays usam `Vec` (já é indireção) e não são boxeados. Recursos, closures e
+  `DbValue` continuam proibidos em payloads.
+- `type_needs_box` percorre campos de interface transitivamente com visited set,
+  quebrando ciclos struct↔enum e enums mutuamente recursivos. A detecção de
+  ciclo struct-only existente permanece ativa.
+- Teste `recursive_enums_and_interface_fields_use_box_indirection`; exemplo
+  `examples/recursive-enums.lift`; E2E cobre List/Tree/Holder.

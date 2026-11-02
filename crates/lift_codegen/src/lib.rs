@@ -260,6 +260,8 @@ struct Emitter {
     function_names: HashMap<String, String>,
     struct_names: HashMap<String, String>,
     enum_named_fields: HashMap<(String, String), Vec<String>>,
+    enum_field_boxed: HashMap<(String, String), Vec<bool>>,
+    enum_named_boxed: HashMap<(String, String), HashMap<String, bool>>,
     /// Nomes Lift de tipos externos: campos usam o nome Rust, sem mangle.
     extern_structs: HashSet<String>,
     parameter_modes: HashMap<BindingId, ParameterPassMode>,
@@ -327,6 +329,42 @@ impl Emitter {
                 })
             })
             .collect();
+        let enum_field_boxed = program
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                HirDeclaration::Enum(enumeration) => Some(enumeration),
+                _ => None,
+            })
+            .flat_map(|enumeration| {
+                enumeration.variants.iter().map(|variant| {
+                    (
+                        (enumeration.name.clone(), variant.name.clone()),
+                        variant.field_boxed.clone(),
+                    )
+                })
+            })
+            .collect();
+        let enum_named_boxed = program
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                HirDeclaration::Enum(enumeration) => Some(enumeration),
+                _ => None,
+            })
+            .flat_map(|enumeration| {
+                enumeration.variants.iter().map(|variant| {
+                    (
+                        (enumeration.name.clone(), variant.name.clone()),
+                        variant
+                            .named_fields
+                            .iter()
+                            .map(|field| (field.name.clone(), field.boxed))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+            })
+            .collect();
 
         Self {
             output: String::from(
@@ -336,6 +374,8 @@ impl Emitter {
             function_names,
             struct_names,
             enum_named_fields,
+            enum_field_boxed,
+            enum_named_boxed,
             extern_structs,
             parameter_modes: HashMap::new(),
             next_temp_name: 0,
@@ -372,11 +412,13 @@ impl Emitter {
                                 .named_fields
                                 .iter()
                                 .map(|field| {
-                                    format!(
-                                        "{}: {}",
-                                        field_name(&field.name),
-                                        self.rust_type(&field.ty)
-                                    )
+                                    let ty = self.rust_type(&field.ty);
+                                    let ty = if field.boxed {
+                                        format!("::std::boxed::Box<{ty}>")
+                                    } else {
+                                        ty
+                                    };
+                                    format!("{}: {ty}", field_name(&field.name))
                                 })
                                 .collect::<Vec<_>>()
                                 .join(", ");
@@ -386,7 +428,15 @@ impl Emitter {
                         let fields = variant
                             .fields
                             .iter()
-                            .map(|ty| self.rust_type(ty))
+                            .zip(&variant.field_boxed)
+                            .map(|(ty, boxed)| {
+                                let ty = self.rust_type(ty);
+                                if *boxed {
+                                    format!("::std::boxed::Box<{ty}>")
+                                } else {
+                                    ty
+                                }
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
                         if fields.is_empty() {
@@ -715,6 +765,7 @@ impl Emitter {
                 self.line(format!("match {value} {{"));
                 self.indent += 1;
                 for arm in &statement.arms {
+                    let mut prologue = Vec::new();
                     let pattern = match &arm.pattern {
                         HirMatchPattern::Some(binding) => {
                             let mutability = if binding.requires_mut { "mut " } else { "" };
@@ -738,45 +789,77 @@ impl Emitter {
                         } => {
                             let path =
                                 format!("{}::{}", self.type_name(enum_name), variant_name(variant));
-                            if *named {
-                                let names = self
-                                    .enum_named_fields
+                            let names = if *named {
+                                self.enum_named_fields
                                     .get(&(enum_name.clone(), variant.clone()))
                                     .cloned()
-                                    .unwrap_or_default();
-                                let fields = bindings
-                                    .iter()
-                                    .zip(names)
-                                    .map(|(binding, name)| {
-                                        let mutability =
-                                            if binding.requires_mut { "mut " } else { "" };
+                                    .unwrap_or_default()
+                            } else {
+                                Vec::new()
+                            };
+                            let named_boxed = if *named {
+                                self.enum_named_boxed
+                                    .get(&(enum_name.clone(), variant.clone()))
+                                    .cloned()
+                                    .unwrap_or_default()
+                            } else {
+                                HashMap::new()
+                            };
+                            let positional_boxed = if *named {
+                                Vec::new()
+                            } else {
+                                self.enum_field_boxed
+                                    .get(&(enum_name.clone(), variant.clone()))
+                                    .cloned()
+                                    .unwrap_or_default()
+                            };
+                            let mut components = Vec::new();
+                            for (index, binding) in bindings.iter().enumerate() {
+                                let boxed = if *named {
+                                    names.get(index).is_some_and(|name| {
+                                        named_boxed.get(name).copied().unwrap_or(false)
+                                    })
+                                } else {
+                                    positional_boxed.get(index).copied().unwrap_or(false)
+                                };
+                                let mutability = if binding.requires_mut { "mut " } else { "" };
+                                if boxed {
+                                    let temporary = self.temp_name();
+                                    prologue.push(format!(
+                                        "let {mutability}{} = *{temporary};",
+                                        binding_name(binding.id)
+                                    ));
+                                    components.push(if *named {
+                                        format!("{}: {temporary}", field_name(&names[index]))
+                                    } else {
+                                        temporary
+                                    });
+                                } else {
+                                    components.push(if *named {
                                         format!(
                                             "{}: {mutability}{}",
-                                            field_name(&name),
+                                            field_name(&names[index]),
                                             binding_name(binding.id)
                                         )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                format!("{path} {{ {fields} }}")
-                            } else if bindings.is_empty() {
-                                path
-                            } else {
-                                let bindings = bindings
-                                    .iter()
-                                    .map(|binding| {
-                                        let mutability =
-                                            if binding.requires_mut { "mut " } else { "" };
+                                    } else {
                                         format!("{mutability}{}", binding_name(binding.id))
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                format!("{path}({bindings})")
+                                    });
+                                }
+                            }
+                            if components.is_empty() {
+                                path
+                            } else if *named {
+                                format!("{path} {{ {} }}", components.join(", "))
+                            } else {
+                                format!("{path}({})", components.join(", "))
                             }
                         }
                     };
                     self.line(format!("{pattern} => {{"));
                     self.indent += 1;
+                    for statement in &prologue {
+                        self.line(statement.clone());
+                    }
                     self.emit_block_contents(&arm.body);
                     self.indent -= 1;
                     self.line("},");
@@ -935,14 +1018,21 @@ impl Emitter {
                     variant_name(variant)
                 );
                 if !named_fields.is_empty() {
+                    let boxed = self
+                        .enum_named_boxed
+                        .get(&(enum_name.clone(), variant.clone()))
+                        .cloned()
+                        .unwrap_or_default();
                     let fields = named_fields
                         .iter()
                         .map(|field| {
-                            format!(
-                                "{}: {}",
-                                field_name(&field.name),
-                                self.expression(&field.value)
-                            )
+                            let value = self.expression(&field.value);
+                            let value = if boxed.get(&field.name).copied().unwrap_or(false) {
+                                format!("::std::boxed::Box::new({value})")
+                            } else {
+                                value
+                            };
+                            format!("{}: {value}", field_name(&field.name))
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -950,9 +1040,22 @@ impl Emitter {
                 } else if fields.is_empty() {
                     path
                 } else {
+                    let boxed = self
+                        .enum_field_boxed
+                        .get(&(enum_name.clone(), variant.clone()))
+                        .cloned()
+                        .unwrap_or_default();
                     let fields = fields
                         .iter()
-                        .map(|field| self.expression(field))
+                        .enumerate()
+                        .map(|(index, field)| {
+                            let value = self.expression(field);
+                            if boxed.get(index).copied().unwrap_or(false) {
+                                format!("::std::boxed::Box::new({value})")
+                            } else {
+                                value
+                            }
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("{path}({fields})")

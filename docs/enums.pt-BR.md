@@ -33,7 +33,7 @@ enum Name {
 ```
 
 - Variantes têm nome e nenhum payload, **payloads posicionais** ou **campos nomeados** (formas mutuamente exclusivas). Vírgulas entre variantes/campos e a vírgula final são opcionais.
-- Tipos de payload são tipos de valor Lift comuns: primitivos, `string`, arrays, interfaces, `Option` e `Result`. Um payload de variante não pode conter outro enum, recurso opaco, closure ou `DbValue` neste incremento.
+- Tipos de payload são tipos de valor Lift comuns: primitivos, `string`, arrays, interfaces, outros enums, `Option` e `Result`. Payloads recursivos são embrulhados automaticamente em `Box` pelo compilador; recursos opacos, closures e `DbValue` continuam rejeitados.
 - Declarações de enum podem vir antes ou depois das funções que as usam. Módulos de arquivo compartilham o namespace flat, então um enum declarado em módulo importado fica visível no pacote; enums qualificados por pacote seguem as mesmas regras dos demais tipos locais.
 - Um enum precisa de ao menos uma variante. Nomes duplicados (contra interfaces/funções) e variantes duplicadas são rejeitados.
 
@@ -49,9 +49,9 @@ const named = Shape.NamedCircle({ radius: 2.0 });
 - Variante com payload precisa ser chamada; variante sem payload é usada diretamente. Parênteses vazios são aceitos para variante sem payload.
 - Enums são tipos de valor: podem ficar em arrays, ser passados/retornados e servir de payload de `Option`/`Result`. Atribuições/cópias seguem as regras normais de clone de Lift (o enum Rust deriva `Clone, Debug, PartialEq`).
 - Igualdade é estrutural: `a == b` / `a != b` comparam variante e payloads. Ordem (`<`, `>`) não é suportada.
-- Um enum não pode ser campo de interface nem parâmetro/retorno FFI neste incremento. Essas posições são rejeitadas antes do codegen.
+- Enums podem ser campos de interface (o campo é inline); parâmetros/retornos FFI ainda rejeitam enums. Tipos recursivos são suportados via campos `Box` automáticos, inclusive ciclos struct↔enum.
 
-## Matching
+## Recursão e campos de interface\n\nPayloads que alcançam um enum (direto ou via campos de interface) recebem `Box` automático no enum Rust gerado; valores Lift continuam sem Box, e construção/matching tratam a indireção. Isso permite `enum List { Nil, Cons(int, List) }`, enums mutuamente recursivos e ciclos como um payload de enum contendo uma interface com campo enum. Interfaces também podem ter campos enum diretamente, e enums podem ter payloads de interface.\n\n## Matching
 
 `match` exige um braço por variante (veja [matching](match.pt-BR.md)):
 
@@ -72,10 +72,10 @@ match shape {
 
 ## Limites
 
-- Sem discriminantes explícitos/valores numéricos, métodos/`impl` em enums, variantes genéricas ou enums recursivos (uma variante não pode carregar o próprio enum nem outro enum). Enums ainda não podem ser campos de interface.
+- Sem discriminantes explícitos/valores numéricos, métodos/`impl` em enums e variantes genéricas. Recursão e campos de interface são suportados via indireção `Box` inserida pelo compilador; não há tipo `Box` explícito em Lift.
 - Enums não podem aparecer em campos de interface, layouts externos, payloads de callback via FFI ou posições de `DbValue`.
 - A sintaxe de union TypeScript `type A = B | C` não está implementada; tagged unions são expressas com este `enum` nominal.
 - Sem wildcard/guarda/pattern aninhado, sem expressão `match` de enum e sem `switch`.
 - Igualdade exige tipos de enum idênticos; não há coerção entre enums.
 
-Testes de parser, semântica, codegen e CLI cobrem declarações, construção de payload posicional e nomeado, match exaustivo, variantes/campos duplicados/ausentes, limites, igualdade, semântica de valor e execução nativa de [`examples/enums.lift`](../examples/enums.lift) e [`examples/enum-fields.lift`](../examples/enum-fields.lift).
+Testes de parser, semântica, codegen e CLI cobrem declarações, construção de payload posicional e nomeado, recursão/campos de interface, match exaustivo, variantes/campos duplicados/ausentes, limites, igualdade, semântica de valor e execução nativa de [`examples/enums.lift`](../examples/enums.lift), [`examples/enum-fields.lift`](../examples/enum-fields.lift) e [`examples/recursive-enums.lift`](../examples/recursive-enums.lift).

@@ -225,6 +225,7 @@ struct EnumInfo {
 struct EnumVariantInfo {
     name: String,
     fields: Vec<ResolvedType>,
+    field_boxed: Vec<bool>,
     named_fields: Vec<HirEnumNamedField>,
     span: Span,
 }
@@ -628,14 +629,7 @@ impl<'ast> Analyzer<'ast> {
                 for field in &variant.fields {
                     match resolve_type(field, names, TypePosition::Field) {
                         Ok(ty) => {
-                            if contains_enum(&ty, enum_names) {
-                                self.errors.push(SemaError::new(
-                                    SemaErrorKind::UnsupportedType,
-                                    "payload de enum não pode conter outro enum nesta fase",
-                                    field.span,
-                                ));
-                                valid = false;
-                            } else if ty.needs_db_runtime() {
+                            if ty.needs_db_runtime() {
                                 self.errors.push(SemaError::new(
                                     SemaErrorKind::UnsupportedType,
                                     "payload de enum não pode usar DbValue nem recursos",
@@ -681,14 +675,7 @@ impl<'ast> Analyzer<'ast> {
                     }
                     match resolve_type(&field.ty, names, TypePosition::Field) {
                         Ok(ty) => {
-                            if contains_enum(&ty, enum_names) {
-                                self.errors.push(SemaError::new(
-                                    SemaErrorKind::UnsupportedType,
-                                    "payload de enum não pode conter outro enum nesta fase",
-                                    field.ty.span,
-                                ));
-                                valid = false;
-                            } else if ty.needs_db_runtime() {
+                            if ty.needs_db_runtime() {
                                 self.errors.push(SemaError::new(
                                     SemaErrorKind::UnsupportedType,
                                     "payload de enum não pode usar DbValue nem recursos",
@@ -706,6 +693,7 @@ impl<'ast> Analyzer<'ast> {
                                 named_fields.push(HirEnumNamedField {
                                     name: field.name.name.clone(),
                                     ty,
+                                    boxed: false,
                                     span: field.span,
                                 });
                             }
@@ -716,9 +704,22 @@ impl<'ast> Analyzer<'ast> {
                         }
                     }
                 }
+                let field_boxed = fields
+                    .iter()
+                    .map(|ty| {
+                        let mut seen = HashSet::new();
+                        type_needs_box(ty, enum_names, &self.structures, &mut seen)
+                    })
+                    .collect::<Vec<_>>();
+                for field in &mut named_fields {
+                    let mut seen = HashSet::new();
+                    field.boxed =
+                        type_needs_box(&field.ty, enum_names, &self.structures, &mut seen);
+                }
                 variants.push(EnumVariantInfo {
                     name: variant.name.name.clone(),
                     fields,
+                    field_boxed,
                     named_fields,
                     span: variant.span,
                 });
@@ -739,6 +740,7 @@ impl<'ast> Analyzer<'ast> {
                             .map(|variant| HirEnumVariant {
                                 name: variant.name,
                                 fields: variant.fields,
+                                field_boxed: variant.field_boxed,
                                 named_fields: variant.named_fields,
                                 span: variant.span,
                             })
@@ -799,15 +801,7 @@ impl<'ast> Analyzer<'ast> {
                             continue;
                         }
                     }
-                    if contains_enum(&ty, enum_names) {
-                        self.errors.push(SemaError::new(
-                            SemaErrorKind::UnsupportedType,
-                            "enum não pode ser campo de interface nesta fase",
-                            field.ty.span,
-                        ));
-                        valid = false;
-                        continue;
-                    }
+
                     let ty = if field.optional {
                         // `field?: T` é o mesmo tipo Rust de `field: T?`, mas
                         // pode ser omitido no object literal. Um aninhamento
@@ -4531,19 +4525,34 @@ enum TypePosition {
     Variable,
 }
 
-fn contains_enum(ty: &ResolvedType, enum_names: &HashSet<String>) -> bool {
+/// Um payload de variante precisa de `Box` quando seu tipo alcança um enum
+/// (direto ou via campos de interface), quebrando ciclos de tamanho.
+fn type_needs_box(
+    ty: &ResolvedType,
+    enum_names: &HashSet<String>,
+    structures: &HashMap<String, StructInfo>,
+    seen: &mut HashSet<String>,
+) -> bool {
     match ty {
-        ResolvedType::Struct(name) => enum_names.contains(name),
-        ResolvedType::Array(element) | ResolvedType::Optional(element) => {
-            contains_enum(element, enum_names)
+        ResolvedType::Struct(name) => {
+            if enum_names.contains(name) {
+                return true;
+            }
+            if !seen.insert(name.clone()) {
+                return true;
+            }
+            structures.get(name).is_some_and(|info| {
+                info.fields
+                    .iter()
+                    .any(|field| type_needs_box(&field.ty, enum_names, structures, seen))
+            })
         }
+        ResolvedType::Optional(inner) => type_needs_box(inner, enum_names, structures, seen),
         ResolvedType::Result(ok, error) => {
-            contains_enum(ok, enum_names) || contains_enum(error, enum_names)
+            type_needs_box(ok, enum_names, structures, seen)
+                || type_needs_box(error, enum_names, structures, seen)
         }
-        ResolvedType::Closure(parameters, result) => {
-            parameters.iter().any(|ty| contains_enum(ty, enum_names))
-                || contains_enum(result, enum_names)
-        }
+        // Vec já introduz indireção; closures/recursos não são payloads válidos.
         _ => false,
     }
 }

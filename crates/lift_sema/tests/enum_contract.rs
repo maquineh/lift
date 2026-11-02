@@ -196,7 +196,60 @@ fn enum_match_requires_qualified_exhaustive_patterns() {
 }
 
 #[test]
-fn enum_limits_reject_nesting_fields_ffi_and_duplicates() {
+fn recursive_enums_and_interface_fields_use_box_indirection() {
+    let program = lower(
+        r#"
+        enum Direction { North, South }
+        interface Holder { direction: Direction }
+        enum List { Nil, Cons(int, List) }
+        enum Tree {
+            Leaf,
+            Node { value: int, left: Tree, right: Tree },
+        }
+        const value: List = List.Cons(1, List.Nil);
+        console.log(value == List.Nil);
+        "#,
+    )
+    .unwrap();
+    let list = enum_decl(&program, "List");
+    let cons = &list.variants[1];
+    assert_eq!(
+        cons.fields,
+        vec![ResolvedType::Int, ResolvedType::Struct("List".into())]
+    );
+    assert_eq!(cons.field_boxed, vec![false, true]);
+    let tree = enum_decl(&program, "Tree");
+    let node = &tree.variants[1];
+    assert_eq!(node.named_fields.len(), 3);
+    assert!(!node.named_fields[0].boxed);
+    assert!(node.named_fields[1].boxed);
+    assert!(node.named_fields[2].boxed);
+    let holder = program
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            HirDeclaration::Struct(structure) if structure.name == "Holder" => Some(structure),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        holder.fields[0].ty,
+        ResolvedType::Struct("Direction".into())
+    );
+
+    // Ciclo struct↔enum: o payload de Holder é boxeado, quebrando o tamanho.
+    lower(
+        r#"
+        enum Wrapper { Value(Holder), Empty }
+        interface Holder { wrapper: Wrapper? }
+        const empty: Holder = { wrapper: null };
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn enum_limits_reject_ffi_and_duplicates() {
     let cases: &[(&str, SemaErrorKind, &str)] = &[
         (
             "enum Empty { }",
@@ -207,16 +260,6 @@ fn enum_limits_reject_nesting_fields_ffi_and_duplicates() {
             "enum Direction { North, North }",
             SemaErrorKind::DuplicateDeclaration,
             "variante duplicada",
-        ),
-        (
-            "enum Direction { North, South } interface Holder { direction: Direction }",
-            SemaErrorKind::UnsupportedType,
-            "campo de interface",
-        ),
-        (
-            "enum Direction { North } enum Wrap { Value(Direction) }",
-            SemaErrorKind::UnsupportedType,
-            "outro enum",
         ),
         (
             "enum Bad { Value(DbValue) }",

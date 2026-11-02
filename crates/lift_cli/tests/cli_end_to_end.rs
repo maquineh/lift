@@ -615,6 +615,40 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
 }
 
 #[test]
+fn recursive_enums_example_runs_boxes_and_interface_fields() {
+    let directory = TempDir::new("recursive-enums");
+    let source = directory.path().join("recursive-enums.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/recursive-enums.lift"),
+    )
+    .unwrap();
+    let expected = "6\n3\ntrue\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("recursive-enums {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("recursive-enums"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário recursive-enums");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn enum_fields_example_runs_named_payloads() {
     let directory = TempDir::new("enum-fields");
     let source = directory.path().join("enum-fields.lift");

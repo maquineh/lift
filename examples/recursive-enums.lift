@@ -1,0 +1,39 @@
+// EN: Recursive enums with automatic Box indirection and enums in interfaces.
+// PT-BR: Enums recursivos com indireção Box automática e enums em interfaces.
+enum Direction { North, South }
+
+interface Holder { direction: Direction }
+
+enum List { Nil, Cons(int, List) }
+
+enum Tree {
+    Leaf,
+    Node { value: int, left: Tree, right: Tree },
+}
+
+function sum(list: List): int {
+    match list {
+        List.Nil => { return 0; }
+        List.Cons(head, tail) => { return head + sum(tail); }
+    }
+}
+
+function sum_tree(tree: Tree): int {
+    match tree {
+        Tree.Leaf => { return 0; }
+        Tree.Node(value, left, right) => {
+            return value + sum_tree(left) + sum_tree(right);
+        }
+    }
+}
+
+const list = List.Cons(1, List.Cons(2, List.Cons(3, List.Nil)));
+console.log(sum(list));
+const tree = Tree.Node({
+    value: 1,
+    left: Tree.Leaf,
+    right: Tree.Node({ value: 2, left: Tree.Leaf, right: Tree.Leaf }),
+});
+console.log(sum_tree(tree));
+const holder: Holder = { direction: Direction.North };
+console.log(holder.direction == Direction.North);

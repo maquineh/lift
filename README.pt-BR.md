@@ -250,7 +250,7 @@ function area(shape: Shape): number {
 const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 ```
 
-Uma variante é construída com `Shape.Circle(2.0)`, uma variante com campos nomeados com `Shape.Circle({ radius: 2.0 })`, e uma sem payload com `Shape.Empty`; contagem/nomes de campo/tipos são checados. Enums são tipos de valor com igualdade estrutural, utilizáveis em arrays, parâmetros, retornos e payloads de `Option`/`Result`. Match exige exatamente um braço por variante e liga payloads posicionalmente; variante ausente/duplicada/desconhecida é rejeitada. Enums não podem ser campos de interface, parâmetros/retornos FFI, nem conter outros enums/payloads recursivos ainda; não há discriminantes explícitos ou unions TypeScript `type A = B | C`. Variantes com campos nomeados ligam posicionalmente na ordem de declaração ao casar. Veja [enums](docs/enums.pt-BR.md).
+Uma variante é construída com `Shape.Circle(2.0)`, uma variante com campos nomeados com `Shape.Circle({ radius: 2.0 })`, e uma sem payload com `Shape.Empty`; contagem/nomes de campo/tipos são checados. Enums são tipos de valor com igualdade estrutural, utilizáveis em arrays, parâmetros, retornos e payloads de `Option`/`Result`. Match exige exatamente um braço por variante e liga payloads posicionalmente; variante ausente/duplicada/desconhecida é rejeitada. Enums podem ser campos de interface e payloads recursivos recebem `Box` inserido pelo compilador; parâmetros/retornos FFI ainda rejeitam enums, e não há discriminantes explícitos ou unions TypeScript `type A = B | C`. Variantes com campos nomeados ligam posicionalmente na ordem de declaração ao casar. Veja [enums](docs/enums.pt-BR.md).
 
 ## Valores opcionais
 
@@ -306,7 +306,7 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 - Laços cobrem `while` e `for...of` sobre arrays com `break`/`continue`; `for` estilo C, labels, ranges, protocolo de iterator e expressões de laço não foram implementados.
 - Métodos de array cobrem `map`, `filter`, `find`, `some`, `every`, `forEach` e `reduce`; `flatMap`, `sort`, parâmetro de índice, iteradores lazy e métodos mutantes como `push` não foram implementados.
 - Matching cobre `Option`/`Result` e enums nominais; wildcards, guardas, patterns aninhados e tipos union TypeScript não foram implementados.
-- Enums suportam payloads posicionais e campos nomeados; enums recursivos, enums em interfaces/FFI, discriminantes explícitos e métodos em enums não foram implementados.
+- Enums suportam payloads posicionais/nomeados, recursão via `Box` automático e campos de interface; enums em FFI, discriminantes explícitos e métodos em enums não foram implementados.
 - O [serviço local de notas](examples/notes-service/README.pt-BR.md) declara DTOs, handlers síncronos, rotas e SQL em Lift. A [API de banco](stdlib/lift_db/README.pt-BR.md) oferece pools SQLite/PostgreSQL configuráveis, execute/query parametrizado, resultados materializados e transações owned. O servidor possui o pool e os handlers o emprestam.
 
 O serviço exercita os contratos documentados de SQL/escalares e HTTP estático. Consulte o [plano de compatibilidade de banco](docs/database-compatibility.pt-BR.md) para a matriz de backends/versões e o [contrato de callbacks/HTTP](docs/callbacks-and-web-contract.pt-BR.md) para limites do adaptador.
@@ -330,6 +330,7 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 - `examples/match.lift` — `match` exaustivo para `Option`, `Result`, sucesso `void` e controle de laço nos braços.
 - `examples/enums.lift` — enums nominais com payloads posicionais, match exaustivo de variantes, igualdade e arrays de enums.
 - `examples/enum-fields.lift` — payloads com campos nomeados, construção por object literal e matching na ordem dos campos.
+- `examples/recursive-enums.lift` — enums recursivos com indireção `Box`, campos de interface e matching recursivo.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 

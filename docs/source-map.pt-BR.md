@@ -79,7 +79,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `crates/lift_sema/tests/liveness_contract.rs` | Elegibilidade e contraexemplos conservadores em joins, retornos, loops, reatribuições, chamadas, parâmetros emprestados e projeções. |
 | `crates/lift_sema/tests/option_contract.rs` | Tipos/null, modos de coalesce lazy, campos opcionais obrigatórios versus omitíveis, narrowing de fluxo (ramos, guardas, else-if, loops, captures, mutações rejeitadas), limites de inferência, ciclos, rejeição de FFI aninhada/struct local e ownership conservador. |
 | `crates/lift_sema/tests/ffi_structs_options_contract.rs` | Resolução de layouts externos e dependências, validação de campo/tipo, aceite e rejeição de structs/Option/Result no FFI e modos de parâmetro emprestados. |
-| `crates/lift_sema/tests/enum_contract.rs` | Declaração/tipagem de enum, construção de payloads posicionais e com campos nomeados, match exaustivo qualificado, limites (campos/FFI/aninhamento/DbValue), igualdade, payloads de option e semântica de clone. |
+| `crates/lift_sema/tests/enum_contract.rs` | Declaração/tipagem de enum, payloads posicionais/nomeados, indireção Box recursiva, campos de interface, match exaustivo qualificado, limites (FFI/DbValue), igualdade, payloads de option e semântica de clone. |
 | `crates/lift_sema/tests/match_contract.rs` | Tipagem de `match` para Option/Result/void, exaustividade, patterns duplicados/incompatíveis, semântica de clone, mutação de payload, garantia de retorno, controle de laço e throw em braços. |
 | `crates/lift_sema/tests/array_methods_contract.rs` | Tipagem de `map`/`filter`/`find`/`some`/`every`/`forEach`/`reduce`, clones do receptor, encadeamento, callbacks nomeados/captures, semântica de valor e callbacks/receptores rejeitados. |
 | `crates/lift_sema/tests/loops_contract.rs` | Tipagem/escopo/snapshot de `for...of`, labels de `while`, alvos aninhados de `break`/`continue`, interação com `try`/`catch`, análise de retorno ausente, regras de mutação e rejeição de consumo de recurso. |
@@ -96,6 +96,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `examples/registry.lift` | Consome `num-integer` 0.1.46 do registry e imprime um MDC. |
 | `examples/liveness.lift` | Decisões clone/move no controle de fluxo com saídas observáveis verificadas por rustc. |
 | `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays e campos opcionais (omitidos e explícitos), narrowing entre guardas e loops e preservação de origens. |
+| `examples/recursive-enums.lift` | Enums recursivos com Box automático, campos de interface com enum e matching recursivo. |
 | `examples/enum-fields.lift` | Variantes com campos nomeados, construção por object literal, binding posicional na ordem dos campos e semântica de valor/igualdade. |
 | `examples/enums.lift` | Enums nominais com payloads, match exaustivo de variantes, igualdade e arrays de enums. |
 | `examples/match.lift` | Match exaustivo de Option/Result, `ok()` para void, snapshots de payload e controle de laço nos braços. |

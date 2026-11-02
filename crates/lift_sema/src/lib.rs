@@ -226,6 +226,8 @@ pub struct HirEnum {
 pub struct HirEnumVariant {
     pub name: String,
     pub fields: Vec<ResolvedType>,
+    /// Um flag de indireção (`Box`) por campo posicional.
+    pub field_boxed: Vec<bool>,
     pub named_fields: Vec<HirEnumNamedField>,
     pub span: Span,
 }
@@ -234,6 +236,8 @@ pub struct HirEnumVariant {
 pub struct HirEnumNamedField {
     pub name: String,
     pub ty: ResolvedType,
+    /// Campo nomeado exige `Box` para quebrar um ciclo de tamanho.
+    pub boxed: bool,
     pub span: Span,
 }
 
