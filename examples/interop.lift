@@ -4,6 +4,33 @@ import function concat(left: string, right: string): string from "lift_core::str
 import function is_empty(values: int[]): boolean from "lift_core::array::is_empty";
 import function strings_are_empty(values: string[]): boolean from "lift_core::array::is_empty";
 
+// EN: External struct layouts and Option values cross the FFI explicitly.
+// PT-BR: Layouts de structs externas e valores Option cruzam a FFI explicitamente.
+import interface IntRange {
+    start: int,
+    end: int,
+} from "lift_core::interop::IntRange";
+import interface Label {
+    text: string,
+    note?: string,
+} from "lift_core::interop::Label";
+
+import function int_range(start: int, end: int): IntRange from "lift_core::interop::int_range";
+import function range_len(range: IntRange): int from "lift_core::interop::range_len";
+import function range_len_or(range: IntRange?, fallback: int): int from "lift_core::interop::range_len_or";
+import function maybe_total(ranges: IntRange[]?): int from "lift_core::interop::maybe_total";
+import function try_range(start: int): Result<IntRange, string> from "lift_core::interop::try_range";
+import function maybe_double(value: int?): int? from "lift_core::interop::maybe_double";
+import function maybe_trim(value: string?): string? from "lift_core::interop::maybe_trim";
+import function label_text(label: Label): string from "lift_core::interop::label_text";
+import function describe_range(result: Result<IntRange, string>): string from "lift_core::interop::describe_range";
+import function maybe_parse(text: string): Result<int?, string> from "lift_core::interop::maybe_parse";
+import function describe_optional(result: Result<int?, string>): string from "lift_core::interop::describe_optional";
+
+// EN: Local structs may contain external struct fields.
+// PT-BR: Structs locais podem conter campos de structs externas.
+interface Boxed { range: IntRange, label: Label }
+
 function greeting(name: string): string {
     return concat("Olá, ", name);
 }
@@ -25,3 +52,51 @@ console.log(strings_are_empty(labels));
 console.log(values[0]);
 console.log(labels[0]);
 echo(name);
+
+const range = int_range(3, 8);
+console.log(range.start);
+console.log(range.end);
+console.log(range_len(range));
+const chosen: IntRange = { start: 10, end: 14 };
+console.log(range_len(chosen));
+console.log(range_len_or(option.some(chosen), -1));
+console.log(range_len_or(null, -1));
+console.log(maybe_double(option.some(21)) ?? -1);
+console.log(maybe_double(null) ?? -1);
+console.log(maybe_trim(option.some("  lift  ")) ?? "none");
+console.log(maybe_trim(null) ?? "none");
+const tag: Label = { text: "demo" };
+console.log(label_text(tag));
+console.log(tag.note ?? "sem nota");
+
+const ranges: IntRange[] = [range, chosen];
+console.log(maybe_total(option.some(ranges)));
+console.log(maybe_total(null));
+const attempt = try_range(5);
+if result.is_ok(attempt) {
+    console.log(result.unwrap(attempt).end);
+} else {
+    console.log(-1);
+}
+console.log(result.unwrap_err(try_range(-1)));
+const boxed: Boxed = { range: chosen, label: { text: "in" } };
+console.log(boxed.range.end);
+console.log(boxed.label.text);
+
+console.log(describe_range(try_range(5)));
+console.log(describe_range(try_range(-1)));
+const empty = maybe_parse("");
+if result.is_ok(empty) {
+    console.log(result.unwrap(empty) ?? -1);
+} else {
+    console.log(result.unwrap_err(empty));
+}
+const invalid = maybe_parse("abc");
+if result.is_ok(invalid) {
+    console.log(result.unwrap(invalid) ?? -1);
+} else {
+    console.log(result.unwrap_err(invalid));
+}
+console.log(describe_optional(maybe_parse("42")));
+console.log(describe_optional(maybe_parse("")));
+console.log(describe_optional(maybe_parse("oops")));

@@ -12,15 +12,15 @@ O pipeline é `.lift` → tokens → AST não tipada → HIR tipado validado →
 | `Cargo.lock` | Grafo fixado de dependências do compilador; instalação e empacotamento usam `--locked`. |
 | `.gitignore` | Exclui artefatos, projetos gerados em qualquer profundidade, binários dos exemplos e ZIPs de distribuição. |
 | `crates/*/Cargo.toml` | Dependências de cada crate; `lift_cli` declara executáveis `lift` e `forklift`. |
-| `crates/lift_ast/src/lib.rs` | Declarações, statements, expressões, imports e tipos não tipados, incluindo `Result<T, E>` especial. Não contém parser ou semântica. |
+| `crates/lift_ast/src/lib.rs` | Declarações, statements, expressões, imports (função e layout de interface externa) e tipos não tipados, incluindo `Result<T, E>` especial. Não contém parser ou semântica. |
 | `crates/lift_ast/src/span.rs` | SourceId e spans de bytes UTF-8; construtores legados com fonte zero e joins no mesmo arquivo. |
 | `crates/lift_lexer/src/lib.rs` | Tokens Logos, erros léxicos, offsets, escapes brutos de strings e testes do lexer. |
 | `crates/lift_parser/src/lib.rs` | Entrada pública `parse`, retornando AST ou erros sintáticos acumulados. |
-| `crates/lift_parser/src/parser.rs` | Declarações/statements por recursive descent, expressões Pratt, imports, argumentos de tipo Result e recuperação. |
+| `crates/lift_parser/src/parser.rs` | Declarações/statements por recursive descent, expressões Pratt, assinaturas de import de função/interface, argumentos de tipo Result e recuperação. |
 | `crates/lift_parser/src/error.rs` | Categorias sintáticas, construções esperadas e spans de erro. |
-| `crates/lift_sema/src/lib.rs` | HIR público, tipos resolvidos, modos de ownership, nomes de builtins Result, diagnósticos e export de `analyze`. |
-| `crates/lift_sema/src/analyzer.rs` | Escopos, tipos, objetos nominais, funções, ownership conservador, aliasing, Result e produção do HIR. |
-| `crates/lift_sema/src/interop.rs` | Valida tipos FFI, caminhos seguros, versões registry exatas e identidade de dependências. |
+| `crates/lift_sema/src/lib.rs` | HIR público, tipos resolvidos, modos de ownership, nomes de builtins, layouts externos, diagnósticos e export de `analyze`. |
+| `crates/lift_sema/src/analyzer.rs` | Escopos, tipos, objetos nominais, layouts externos, funções, ownership conservador, aliasing, Result e produção do HIR. |
+| `crates/lift_sema/src/interop.rs` | Valida tipos FFI incluindo structs externas, Option direto e parâmetros Result emprestados; caminhos seguros, versões registry exatas e identidade de dependências. |
 | `crates/lift_sema/src/liveness.rs` | Passagem privada CFG/liveness após validação e decisões restritas de move de local direto. |
 | `crates/lift_codegen/src/lib.rs` | Emite Rust e manifestos Cargo com clones, temporários, wrappers FFI seguros e inspeção de Result. |
 | `crates/lift_cli/src/lib.rs` | Comandos, diagnósticos, extração do core embutido, projetos gerados, Cargo, localização de artefatos e execução. |
@@ -77,18 +77,29 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `crates/lift_sema/tests/semantic_contract.rs` | Tipos, recursão, empréstimos, rejeição de aliasing, imports, builtins e validação de Result. |
 | `crates/lift_sema/tests/frontend_robustness.rs` | Mutações/truncamentos reproduzíveis, ausência de panic e spans de tokens válidos. |
 | `crates/lift_sema/tests/liveness_contract.rs` | Elegibilidade e contraexemplos conservadores em joins, retornos, loops, reatribuições, chamadas, parâmetros emprestados e projeções. |
-| `crates/lift_sema/tests/option_contract.rs` | Tipos/null, modos de coalesce lazy, campos obrigatórios, limites de inferência, ciclos, rejeição FFI e ownership conservador. |
-| `crates/lift_codegen/tests/codegen_contract.rs` | Contratos do Rust/Cargo gerados, wrappers, Result, clones e temporários de chamada. |
+| `crates/lift_sema/tests/option_contract.rs` | Tipos/null, modos de coalesce lazy, campos opcionais obrigatórios versus omitíveis, narrowing de fluxo (ramos, guardas, else-if, loops, captures, mutações rejeitadas), limites de inferência, ciclos, rejeição de FFI aninhada/struct local e ownership conservador. |
+| `crates/lift_sema/tests/ffi_structs_options_contract.rs` | Resolução de layouts externos e dependências, validação de campo/tipo, aceite e rejeição de structs/Option/Result no FFI e modos de parâmetro emprestados. |
+| `crates/lift_sema/tests/match_contract.rs` | Tipagem de `match` para Option/Result/void, exaustividade, patterns duplicados/incompatíveis, semântica de clone, mutação de payload, garantia de retorno, controle de laço e throw em braços. |
+| `crates/lift_sema/tests/array_methods_contract.rs` | Tipagem de `map`/`filter`/`find`/`some`/`every`/`forEach`/`reduce`, clones do receptor, encadeamento, callbacks nomeados/captures, semântica de valor e callbacks/receptores rejeitados. |
+| `crates/lift_sema/tests/loops_contract.rs` | Tipagem/escopo/snapshot de `for...of`, labels de `while`, alvos aninhados de `break`/`continue`, interação com `try`/`catch`, análise de retorno ausente, regras de mutação e rejeição de consumo de recurso. |
+| `crates/lift_sema/tests/higher_order_contract.rs` | Resolução e armazenamento/cópia de tipos de função, funções nomeadas como valores, captures de callback, parâmetros higher-order, chamada imediata de callbacks retornados, callback FFI e posicionamentos rejeitados. |
+| `crates/lift_sema/tests/errors_contract.rs` | Contexto/aridade de `result.ok`/`result.err`, alvos de propagação de `?`/`throw`, correspondência de tipo de erro, mutabilidade e garantia de retorno do catch, `try` aninhado e move versus clone de recursos. |
+| `crates/lift_codegen/tests/codegen_contract.rs` | Contratos do Rust/Cargo gerados, wrappers, asserções de layout/traits externos, conversões de Option, Result, clones e temporários de chamada. |
 | `crates/lift_cli/tests/cli_end_to_end.rs` | Compila/executa exemplos, relocação, caminhos Cargo, argumentos/stdin/arquivos, Result, relatórios Ariadne, sessão LSP em processo, combinação de recursos e rejeição de aliasing. O teste registry usa a rede. |
 | `docs/testing-and-release.pt-BR.md` | Matriz recurso→teste, gates de CI, comandos de fuzzing e aceite de release. |
 | `examples/fibonacci.lift` | Controle de fluxo inteiro recursivo e iterativo. |
 | `examples/ownership.lift` | Mutação e valores próprios sem notação explícita de borrow Rust. |
-| `examples/interop.lift` | Imports locais seguros, arrays/strings emprestados e `console.log`. |
+| `examples/interop.lift` | Imports locais seguros, arrays/strings emprestados, layouts de structs externas, parâmetros/retornos Option diretos e `console.log`. |
 | `examples/stdlib.lift` | Comprimentos, pertinência, trim e iteração compatíveis com FFI. |
 | `examples/io.lift` | Trata Result ao ler argumentos/stdin e gravar/ler arquivos UTF-8. |
 | `examples/registry.lift` | Consome `num-integer` 0.1.46 do registry e imprime um MDC. |
 | `examples/liveness.lift` | Decisões clone/move no controle de fluxo com saídas observáveis verificadas por rustc. |
-| `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays/campos opcionais e preservação de origens. |
+| `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays e campos opcionais (omitidos e explícitos), narrowing entre guardas e loops e preservação de origens. |
+| `examples/match.lift` | Match exaustivo de Option/Result, `ok()` para void, snapshots de payload e controle de laço nos braços. |
+| `examples/array-methods.lift` | Métodos higher-order de array, encadeamento, captures de callback e resultados struct/string. |
+| `examples/loops.lift` | `for...of` sobre arrays, `while`, fluxo aninhado, escopo de laço e iteração de structs/arrays. |
+| `examples/higher-order.lift` | Tipos de função, callbacks armazenados/copiados, closures retornadas, parâmetros higher-order, captures e callbacks FFI. |
+| `examples/errors.lift` | Construtores de Result, propagação de `?` para `try`/função, `throw`, catch tipado, fallthrough e execução nativa sem recursos. |
 | `examples/modules/main.lift` | Entrada com imports repetidos e execução única dos statements root. |
 | `examples/modules/models.lift` | Interface/funções compartilhadas e declaração FFI Rust. |
 | `examples/modules/math/api.lift`, `math/helpers.lift` | Imports relativos/transitivos, chamadas cruzadas e ciclos de módulo/root. |
@@ -98,6 +109,6 @@ Testes unitários ficam junto das implementações de spans, lexer e stdlib. Exe
 
 ## Registros de decisões
 
-Os registros internos ficam em `.agents/skills/truxt-compiler/` (ID legado da skill): `SKILL.md` define o fluxo de contribuição; `references/architecture.md` é o blueprint alvo; as decisões de fases 1/2/3 descrevem sintaxe e semântica implementadas; `codegen-cli-decisions.md` registra lowering/Cargo; `phase5-decisions.md` registra imports seguros limitados e console. O contrato atual de Result/I/O está em `docs/result-and-io.pt-BR.md` e sua versão inglesa. Um item no roadmap não significa que esteja implementado.
+Os registros internos ficam em `.agents/skills/truxt-compiler/` (ID legado da skill): `SKILL.md` define o fluxo de contribuição; `references/architecture.md` é o blueprint alvo; as decisões de fases 1/2/3 descrevem sintaxe e semântica implementadas; `codegen-cli-decisions.md` registra lowering/Cargo; `phase5-decisions.md` registra imports seguros, console e o incremento de structs externas/Option. O contrato atual de Result/I/O está em `docs/result-and-io.pt-BR.md` e sua versão inglesa; layouts externos e FFI de Option ficam em `docs/ffi-structs-and-options.pt-BR.md`, o caminho de erro com construtores/`?`/`throw`/`try` em `docs/errors.pt-BR.md`, tipos de função/callbacks em `docs/higher-order.pt-BR.md`, laços em `docs/loops.pt-BR.md`, métodos de array em `docs/array-methods.pt-BR.md`, e match de Option/Result em `docs/match.pt-BR.md`, cada um com versão inglesa. Um item no roadmap não significa que esteja implementado.
 
 Diagnósticos/reuso estão em `docs/diagnostics-and-build.pt-BR.md`; módulos legados em `docs/modules.pt-BR.md`; sessão/lint/LSP em `docs/project-analysis-and-lsp.pt-BR.md`; manifestos/namespaces locais em `docs/forklift.pt-BR.md`. Todos têm versão inglesa. Testes de contrato/API e `examples/packages/app` cobrem o incremento de pacotes locais. Cache por chave de dependências continua futuro.

@@ -11,7 +11,7 @@ Este documento registra a primeira implementação de `lift_sema`. O blueprint c
 - Object literals exigem tipo nominal esperado e precisam informar exatamente os campos da interface. O HIR preserva a ordem fonte dos valores para não reordenar efeitos; campos são identificados pelo nome.
 - Arrays não vazios inferem o tipo pelo primeiro elemento e validam os demais. Arrays vazios exigem anotação/contexto.
 - Valores retornados exigem anotação explícita; função sem anotação retorna `void`. O incremento Result permite `void` também como payload de sucesso.
-- Tipos opcionais T?, null contextual, option.some/is_some/unwrap e ?? seguem o contrato v1 em phase4-decisions.md e docs/option*. Métodos nominais e closures locais snapshot possuem contrato em methods-closures-templates-decisions.md; tipos de função públicos, callbacks e escape continuam rejeitados. Option não participa do FFI.
+- Tipos opcionais T?, null contextual, option.some/is_some/unwrap e ?? seguem o contrato v1 em phase4-decisions.md e docs/option*. Métodos nominais e closures locais snapshot possuem contrato em methods-closures-templates-decisions.md; o incremento higher-order posterior aceita tipo público `(T) => R`, callbacks e captura de callbacks, mantendo campos/arrays/Option/Result e captures mutáveis fora. Option não participava do FFI no v1; `T?` direto passou a ser aceito no incremento de structs externas/Option em `phase5-decisions.md`, e Option dentro de Array/Result continua fora.
 - Structs suportam derives `Clone`, `Debug` e `PartialEq` com os tipos atuais. Um ciclo por campos de tamanho direto é rejeitado; um ciclo que passa por `Vec` é permitido.
 - Strings preservam escapes até o codegen, que decodifica barra invertida, aspas, apóstrofo, n, r, t e zero; escapes desconhecidos são de identidade. Templates aceitam interpolação primitiva ordenada conforme methods-closures-templates-decisions.md. Escapes Unicode continuam pendentes.
 
@@ -35,7 +35,7 @@ Este documento registra a primeira implementação de `lift_sema`. O blueprint c
 - Somente Clone com CloneMode::Value e operando Local owned direto vira HirExprKind::Move quando esse BindingId ocorre uma vez no statement completo e está morto no live_out em todos os caminhos. O HIR registra a decisão e codegen apenas emite o binding. Contadores de if/while incluem condição e ambos os ramos/corpo; statements filhos possuem seus próprios pontos.
 - Owned inclui variáveis locais e parâmetros ByValue/OwnedMove; BorrowImm/BorrowMut são excluídos. ByClone em chamadas, BorrowedString/Aggregate, campos/índices, operandos agrupados, múltiplas ocorrências e casos incertos mantêm clone. Não há mudança do conjunto aceito nem relaxamento de diagnósticos/aliasing. Código inalcançável não é otimizado e constantes não eliminam arestas.
 - Essa prova é restrita a statements e não é inferência geral de último uso ou de efeitos/alias. A passagem só substitui clones já explícitos; retornos owned que já eram Local não recebem marca nova. Testes de sema/codegen e E2E liveness validam casos elegíveis e contraexemplos, incluindo rustc real. Guias EN/PT: docs/liveness.md e docs/liveness.pt-BR.md.
-- Some e Coalesce têm payloads/snapshots owned explícitos. Os walkers observam payload e ambos os operandos de ?? conservadoramente, mas a reescrita de último uso não entra nesses nós; clones internos permanecem. RHS continua condicional no runtime e não há narrowing.
+- Some e Coalesce têm payloads/snapshots owned explícitos. Os walkers observam payload e ambos os operandos de ?? conservadoramente, mas a reescrita de último uso não entra nesses nós; clones internos permanecem. RHS continua condicional no runtime. (Narrowing de fluxo foi acrescentado depois; ver `phase4-decisions.md`, seção de campos opcionais/narrowing v1.)
 - A inferência de escape é conservadora e sintática: o parâmetro torna-se `OwnedMove` quando aparece como valor em retorno direto, object literal ou array literal. Campo/elemento derivado e argumento de chamada não contam como escape porque places nesses contextos são clonados quando viram valores owned. Isso não é uma análise geral de efeitos/alias.
 - `pre_evaluation_temp` registra apenas conflitos diretos observáveis por raízes de bindings nos argumentos. Chamadas/efeitos com ordenação mais complexa e aliasing não representável por uma raiz simples devem receber diagnóstico antes de serem declarados seguros.
 
@@ -54,3 +54,59 @@ Esta seção avalia a proposta histórica externa/HTML. A passagem limitada de
 A divisão entre resumo interprocedural, liveness reversa e resolução de aliasing é uma boa arquitetura para a versão futura. O pseudocódigo/HTML fornecido não implementa essa garantia ainda: falta caminhar por todas as expressões e ramos, fechar o ponto fixo de loops, distinguir usos/defs por IDs, e produzir uma estratégia de temporários antes dos empréstimos. Mutação e escape são fatos independentes e não podem ser colapsados por precedência sem definir a semântica de cópia.
 
 A revisão encontrou no HTML exemplos finais que ainda emitem `subir_nivel(&mut heroi, heroi.nivel)` e `renomear(&mut u, &u.nome.clone())`. Ambos tentam avaliar a leitura depois de iniciar o empréstimo mutável; a saída precisa materializar o argumento antes da chamada. O simulador é uma animação baseada em dados fixos (`CASES_DATA`), não executa o algoritmo nem valida o Rust emitido. Ele deve ser tratado como ilustração, não como teste.
+
+## Laços e controle de fluxo v2
+
+Contrato público: `docs/loops.md` e `docs/loops.pt-BR.md`; exemplo
+`examples/loops.lift`; teste `crates/lift_sema/tests/loops_contract.rs`.
+
+- Lexer ganhou `for`, `break` e `continue`; `of` é contextual (identificador),
+  não palavra reservada. Sintaxe: `for (const|let nome of expressão) bloco`.
+  `break;`/`continue;` exigem ponto e vírgula e só valem dentro de laço.
+- AST: `Statement::ForOf`, `Break`, `Continue` com spans. HIR: `HirForOf`
+  { label, id, name, binding, element_ty, iterable, body }, `HirBreak`/`HirContinue`
+  { target: LoopId }. `HirWhile` passou a carregar `label`.
+- Semântica: iterable precisa ser `T[]`; elementos não podem ser recursos;
+  o array é materializado/clonado uma vez (snapshot owned) e cada iteração recebe
+  um valor owned. Binding `const` é somente leitura; `let` pode ser reatribuído.
+  Escopo só no corpo; sem sombreamento; nome reutilizável depois do laço.
+- Controle: `break`/`continue` miram o laço mais interno via `LoopId`; dentro de
+  `try`/`catch` continuam mirando o laço e ignoram o catch. Corpo de closure
+  reinicia a pilha de laços, então controle de laço externo é rejeitado.
+- Retorno: laço pode executar zero vezes, então não conta em
+  `block_guarantees_exit`/`block_guarantees_return`; `return` no corpo retorna
+  da função. Recursos: o corpo não pode consumir recurso externo (mesma regra do
+  `while`), mas pode criar/consumir dentro de uma iteração.
+- Liveness: cada laço é um ponto conservador com back-edge; usos do corpo contam
+  e clones internos não viram moves. `break`/`continue` mantêm sucessor
+  conservador para não tornar variáveis não-vivas cedo demais.
+- Codegen: `'lift_loop_N: for ... in <iterable>` e `'lift_loop_N: while ...`;
+  `break 'lift_loop_N;`/`continue 'lift_loop_N;`. O label permite atravessar o
+  bloco rotulado de `try` (Rust E0695 sem label).
+- Testes: parser (sintaxe e rejeições), semântica (tipos, escopo, alvos, retorno,
+  recursos), código gerado e E2E check/build/run do exemplo.
+## Métodos higher-order de array v2
+
+Contrato público: `docs/array-methods*.md`; exemplo `examples/array-methods.lift`;
+teste `crates/lift_sema/tests/array_methods_contract.rs`.
+
+- Sem sintaxe nova: `valores.map(callback)` reutiliza FieldAccess + Call. A
+  semântica intercepta a chamada quando o tipo do receptor é `Array(T)`; nomes
+  reconhecidos: `map`, `filter`, `forEach`, `find`, `some`, `every`, `reduce`.
+  Outros nomes viram `sema.UnknownField` ("array não tem método").
+- HIR `HirExprKind::ArrayMethod { method, array, callback, initial }` com
+  `ArrayMethodKind`. O receptor e o callback são materializados owned (clone do
+  Rc/array quando place); o `reduce` carrega o inicial. Tipos resultantes:
+  `map` → `U[]`, `filter` → `T[]`, `find` → `T?`, `some`/`every` → `boolean`,
+  `forEach` → `void`, `reduce` → `U`.
+- Assinaturas exigidas: `map (T)=>U`; predicados `(T)=>boolean`; `forEach
+  (T)=>void`; `reduce (U,T)=>U` com inicial `U`. Callback pode ser closure ou
+  função nomeada. `find` em `T?[]` é rejeitado para não criar Option aninhado.
+- Codegen monomorfizado por elemento: `into_iter().map(...).collect::<Vec<U>>()`,
+  `filter`/`find` clonam o item antes do predicado, `any`/`all`, `for` para
+  `forEach` e `fold` para `reduce`. Array e callback são avaliados uma vez em
+  temporários. Sem generics Lift e sem iteradores lazy.
+- Walkers de liveness/resources/packages/lint/console percorrem array, callback e
+  inicial. Liveness conservadora; clones internos não viram moves.
+- Testes: semântica (tipos, clone do receptor, encadeamento, captures, rejeições),
+  codegen (pontes de iterator) e E2E check/build/run do exemplo.

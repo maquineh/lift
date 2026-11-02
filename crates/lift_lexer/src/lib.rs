@@ -127,8 +127,22 @@ pub enum Token {
     If,
     #[token("else")]
     Else,
+    #[token("match")]
+    Match,
     #[token("while")]
     While,
+    #[token("for")]
+    For,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
+    #[token("try")]
+    Try,
+    #[token("catch")]
+    Catch,
+    #[token("throw")]
+    Throw,
     #[token("return")]
     Return,
     #[token("null")]

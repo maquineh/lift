@@ -61,6 +61,21 @@ impl ResolvedType {
             _ => false,
         }
     }
+    /// Valor de função boxed (`Box<dyn Fn>`): não é `Copy` nem `Clone`.
+    /// PT-BR: valor de função boxed; move-only.
+    pub fn contains_closure(&self) -> bool {
+        match self {
+            Self::Closure(..) => true,
+            Self::Array(t) | Self::Optional(t) => t.contains_closure(),
+            Self::Result(a, b) => a.contains_closure() || b.contains_closure(),
+            _ => false,
+        }
+    }
+    /// Recursos opacos exigem move; callbacks são `Rc` e seguem a cópia Lift.
+    /// PT-BR: apenas recursos são afins; callbacks usam Rc clonável.
+    pub fn is_affine(&self) -> bool {
+        self.contains_resource()
+    }
     pub const fn is_copy(&self) -> bool {
         matches!(self, Self::Int | Self::Number | Self::Boolean)
     }
@@ -83,7 +98,14 @@ impl ResolvedType {
 impl fmt::Display for ResolvedType {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Closure(_, _) => formatter.write_str("closure"),
+            Self::Closure(parameters, result) => {
+                let parameters = parameters
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(formatter, "({parameters}) => {result}")
+            }
             Self::Int => formatter.write_str("int"),
             Self::Number => formatter.write_str("number"),
             Self::String => formatter.write_str("string"),
@@ -146,6 +168,9 @@ pub struct HirProgram {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HirDeclaration {
     Struct(HirStruct),
+    /// Tipo externo validado; o codegen não gera `struct`, só asserções de layout.
+    /// PT-BR: tipo externo, sem geração de struct.
+    ExternStruct(HirExternStruct),
     Function(HirFunction),
     Import(HirImport),
     Statement(HirStatement),
@@ -188,10 +213,26 @@ pub struct HirStruct {
     pub span: Span,
 }
 
+/// Declaração de layout de um tipo Rust externo (`import interface ... from`).
+/// O compilador assume `Clone + Debug + PartialEq`, campos públicos e nomes de
+/// campo idênticos; o Rust gerado contém asserções que o `rustc` verifica.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirExternStruct {
+    pub name: String,
+    pub fields: Vec<HirStructField>,
+    pub dependency: RustDependency,
+    /// Caminho Rust completo do tipo, já validado.
+    pub rust_path: String,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct HirStructField {
     pub name: String,
     pub ty: ResolvedType,
+    /// Declarado como `name?: T`: o object literal pode omiti-lo (`None`).
+    /// PT-BR: campo omitível; o tipo já é `Optional`.
+    pub optional: bool,
     pub span: Span,
 }
 
@@ -227,10 +268,24 @@ pub struct HirBlock {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HirStatement {
     Variable(HirVariableDeclaration),
+    /// Binding derivado somente leitura que materializa o payload de um
+    /// opcional estreitado. `id` só existe no bloco em que `Narrow` aparece.
+    /// PT-BR: binding derivado de narrowing; lê o payload owned do opcional.
+    Narrow(HirNarrowing),
     Assignment(HirAssignment),
     If(HirIf),
     While(HirWhile),
+    /// `match` exaustivo de `Option<T>`/`Result<T, E>`.
+    Match(HirMatch),
+    /// `for (const item of values) { ... }` com cópia owned do array.
+    ForOf(HirForOf),
+    Break(HirBreak),
+    Continue(HirContinue),
     Return(HirReturn),
+    /// `throw valor;`: diverge para o `catch` mais próximo ou para o retorno.
+    Throw(HirThrow),
+    /// `try { ... } catch (erro: E) { ... }`.
+    TryCatch(HirTryCatch),
     Expression(HirExpressionStatement),
 }
 
@@ -238,13 +293,70 @@ impl HirStatement {
     pub fn span(&self) -> Span {
         match self {
             Self::Variable(node) => node.span,
+            Self::Narrow(node) => node.span,
             Self::Assignment(node) => node.span,
             Self::If(node) => node.span,
             Self::While(node) => node.span,
+            Self::Match(node) => node.span,
+            Self::ForOf(node) => node.span,
+            Self::Break(node) => node.span,
+            Self::Continue(node) => node.span,
             Self::Return(node) => node.span,
+            Self::Throw(node) => node.span,
+            Self::TryCatch(node) => node.span,
             Self::Expression(node) => node.span,
         }
     }
+}
+
+/// Identidade de um bloco `try`, usada pelo `break` do Rust gerado.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TryId(pub u32);
+
+/// Identidade de um laço, usada pelos labels `break`/`continue` do Rust gerado.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LoopId(pub u32);
+
+/// Destino de `?`/`throw`: o `try` mais próximo com erro compatível ou o
+/// retorno `Result<_, E>` da função corrente.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropagateTarget {
+    Function,
+    Try(TryId),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirThrow {
+    pub value: HirExpr,
+    pub target: PropagateTarget,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirTryCatch {
+    pub label: TryId,
+    pub body: HirBlock,
+    pub catch_id: BindingId,
+    pub catch_name: String,
+    pub catch_ty: ResolvedType,
+    /// O binding do catch precisa de `mut` no padrão Rust gerado.
+    pub catch_mut: bool,
+    /// Todas as rotas do try/catch retornam da função; o codegen fecha a
+    /// divergência com `unreachable!()` para satisfazer o tipo de retorno.
+    pub returns: bool,
+    pub catch_body: HirBlock,
+    pub span: Span,
+}
+
+/// Extração de payload de `T?` provada por um teste de fluxo. O codegen clona
+/// o payload; mutações através do binding derivado não são aceitas.
+/// PT-BR: payload de `T?` provado pelo fluxo; codegen clona e não aceita mutação.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirNarrowing {
+    pub id: BindingId,
+    pub source: BindingId,
+    pub ty: ResolvedType,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -283,8 +395,68 @@ pub enum HirElseBranch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HirWhile {
+    pub label: LoopId,
     pub condition: HirExpr,
     pub body: HirBlock,
+    pub span: Span,
+}
+
+/// `match` de `Option<T>`/`Result<T, E>` com braços exaustivos.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirMatch {
+    pub value: HirExpr,
+    pub arms: Vec<HirMatchArm>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirMatchArm {
+    pub pattern: HirMatchPattern,
+    pub body: HirBlock,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HirMatchPattern {
+    Some(HirMatchBinding),
+    None,
+    /// `None` representa `ok()` para sucesso `void`.
+    Ok(Option<HirMatchBinding>),
+    Err(HirMatchBinding),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirMatchBinding {
+    pub id: BindingId,
+    pub name: String,
+    pub ty: ResolvedType,
+    /// Campos do payload foram mutados no braço; o padrão Rust usa `mut`.
+    pub requires_mut: bool,
+    pub span: Span,
+}
+
+/// Iteração `for...of`; o array já foi materializado/clonado pela semântica.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirForOf {
+    pub label: LoopId,
+    pub id: BindingId,
+    pub name: String,
+    pub binding: BindingKind,
+    pub element_ty: ResolvedType,
+    pub iterable: HirExpr,
+    pub body: HirBlock,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirBreak {
+    pub target: LoopId,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HirContinue {
+    pub target: LoopId,
     pub span: Span,
 }
 
@@ -324,9 +496,23 @@ pub enum HirExprKind {
         parameters: Vec<HirParameter>,
         body: HirBlock,
     },
+    /// Referência a uma função nomeada convertida em valor `Box<dyn Fn>`.
+    /// PT-BR: função nomeada como valor de função.
+    FunctionValue {
+        name: String,
+        parameters: Vec<(ResolvedType, ParameterPassMode)>,
+        return_type: ResolvedType,
+    },
     ClosureCall {
         callee: Box<HirExpr>,
         arguments: Vec<HirExpr>,
+    },
+    /// Métodos higher-order de array, monomorfizados pelo tipo do elemento.
+    ArrayMethod {
+        method: ArrayMethodKind,
+        array: Box<HirExpr>,
+        callback: Box<HirExpr>,
+        initial: Option<Box<HirExpr>>,
     },
     IntegerLiteral(i64),
     NumberLiteral(f64),
@@ -335,6 +521,15 @@ pub enum HirExprKind {
     OptionNone,
     /// Payload is already materialized as owned; PT-BR: payload já é owned.
     OptionSome(Box<HirExpr>),
+    /// `result.ok(valor)`; `None` representa `Ok(())` para sucesso `void`.
+    ResultOk(Option<Box<HirExpr>>),
+    /// `result.err(valor)` com o payload de erro owned.
+    ResultErr(Box<HirExpr>),
+    /// `expressão?`: lê o sucesso e propaga o erro para o alvo.
+    TryPropagate {
+        expression: Box<HirExpr>,
+        target: PropagateTarget,
+    },
     /// Both operands are owned; fallback executes only for None.
     /// PT-BR: Ambos são owned; fallback executa somente para None.
     Coalesce {
@@ -382,6 +577,45 @@ pub enum HirExprKind {
     /// Proven last use of a direct owned local; codegen emits its binding.
     /// PT-BR: Último uso comprovado de local owned; codegen emite o binding.
     Move(Box<HirExpr>),
+}
+
+/// Métodos higher-order disponíveis em arrays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArrayMethodKind {
+    Map,
+    Filter,
+    ForEach,
+    Find,
+    Some,
+    Every,
+    Reduce,
+}
+
+impl ArrayMethodKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Map => "map",
+            Self::Filter => "filter",
+            Self::ForEach => "forEach",
+            Self::Find => "find",
+            Self::Some => "some",
+            Self::Every => "every",
+            Self::Reduce => "reduce",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "map" => Some(Self::Map),
+            "filter" => Some(Self::Filter),
+            "forEach" => Some(Self::ForEach),
+            "find" => Some(Self::Find),
+            "some" => Some(Self::Some),
+            "every" => Some(Self::Every),
+            "reduce" => Some(Self::Reduce),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -462,6 +696,12 @@ pub enum SemaErrorKind {
     BorrowConflict,
     BorrowMutRequiresMutablePlace,
     UnsupportedOwnershipPattern,
+    /// `?`/`throw` sem `try` compatível nem retorno `Result<_, E>`.
+    InvalidPropagation,
+    /// `break`/`continue` fora de `while`/`for`.
+    InvalidLoopControl,
+    /// `match` não exaustivo, com braço duplicado ou padrão incompatível.
+    InvalidMatch,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

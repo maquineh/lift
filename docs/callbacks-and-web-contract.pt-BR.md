@@ -10,7 +10,11 @@ Este documento descreve o alvo geral da API HTTP. A PoC de notas agora inclui
 `GET /notes` e `POST /notes`. Esses DTOs, handlers e registros agora são
 declarados em Lift, com bridges geradas para um adaptador Rust genérico.
 Veja [o subconjunto implementado](resources-and-http.pt-BR.md).
-Closures que escapam e callbacks FFI arbitrários continuam fora.
+Closures que escapam e callbacks FFI arbitrários continuam fora. Parâmetros/retornos
+diretos de tipo função agora são valores de primeira classe e callbacks FFI seguros;
+veja [tipos de função e callbacks](higher-order.pt-BR.md). Assinaturas arbitrárias,
+callbacks aninhados em payloads, handlers async e valores de handler HTTP continuam
+fora deste contrato.
 
 ## Primeiro modelo de handler
 

@@ -123,7 +123,22 @@ import function concat(left: string, right: string): string from "lift_core::str
 console.log(concat("Olá, ", "Lift!"));
 ```
 
-O FFI aceita funções Rust livres e seguras com escalares e arrays de um nível. Parâmetros `string` são passados como `&str`, e retornos string como `String` owned; parâmetros array são slices emprestados e retornos array são `Vec<T>` owned. `void` corresponde a `()`. Um import também pode retornar `Result<T, E>` com payloads suportados; parâmetros Result e retornos Result aninhados continuam fora do FFI. Imports registry usam versão exata `MAJOR.MINOR.PATCH`. O wrapper Rust deixa `rustc` verificar caminho e assinatura. FFI de structs, `unsafe` e arrays aninhados não são suportados.
+O FFI aceita funções Rust livres e seguras com escalares, arrays de um nível, structs externas, valores opcionais diretos e parâmetros/retornos `Result`. Parâmetros `string` são passados como `&str`, e retornos string como `String` owned; parâmetros array são slices emprestados e retornos array são `Vec<T>` owned; parâmetros de struct externa são emprestados e retornos são owned. `T?` vira `Option<&str>`, `Option<&[T]>`, `Option<&P>` ou `Option<escalar>` em parâmetros e o option owned em retornos. `void` corresponde a `()`. Um import também pode receber e retornar `Result<T, E>`: parâmetros são emprestados (`&Result<...>`), payloads usam o mapeamento owned e podem conter um `Option` direto, e `Result`/`Option<Result>` aninhados continuam fora. Parâmetro de tipo função é um callback (`&dyn Fn` com payloads owned), e retorno de tipo função é `Box<dyn Fn>` convertido para `Rc` pelo wrapper. Imports registry usam versão exata `MAJOR.MINOR.PATCH`. O wrapper Rust deixa `rustc` verificar caminho e assinatura.
+
+Uma struct Rust é declarada com `import interface`, que mapeia cada campo Lift para um campo Rust público e exige `Clone + Debug + PartialEq`; o código gerado afirma o layout, então `rustc` rejeita campo ausente, privado, renomeado ou com tipo diferente:
+
+```lift
+import interface IntRange {
+    start: int,
+    end: int,
+} from "lift_core::interop::IntRange";
+import function int_range(start: int, end: int): IntRange from "lift_core::interop::int_range";
+
+const range = int_range(3, 8);
+console.log(range.start);
+```
+
+Somente tipos declarados com `import interface` cruzam a FFI; structs locais Lift, Option aninhado em arrays/Result, arrays aninhados, `unsafe` e raw identifiers não são suportados. Consulte [structs externas e Option](docs/ffi-structs-and-options.pt-BR.md) para o mapeamento exato, as checagens de layout e os limites.
 
 `console.log` aceita uma expressão de `int`, `number`, `boolean` ou `string` e a escreve com uma quebra de linha. Atualmente, falhas ao escrever em stdout causam panic.
 
@@ -135,7 +150,83 @@ import function trim(value: string): string from "lift_core::interop::string_tri
 import function contem(values: int[], value: int): boolean from "lift_core::interop::array_contains_int";
 ```
 
-Os adaptadores também oferecem `string_len` e `array_contains_number`, `array_contains_boolean` e `array_contains_string`. Os helpers com callbacks (`map`, `filter` e `find`) continuam exclusivos do Rust porque o subconjunto de closures locais ainda não aceita tipos de função higher-order ou FFI. Consulte o [guia da biblioteca core](stdlib/lift_core/README.pt-BR.md) para a API completa.
+Os adaptadores também oferecem `string_len` e `array_contains_number`, `array_contains_boolean` e `array_contains_string`, além de adaptadores de callback como `apply_twice` e `apply_text`. Arrays Lift também têm métodos embutidos `map`/`filter`/`find`/`reduce` (veja [métodos de array](docs/array-methods.pt-BR.md)); os adaptadores Rust `map`/`filter`/`find` continuam disponíveis para chamadores Rust. Consulte o [guia da biblioteca core](stdlib/lift_core/README.pt-BR.md) para a API completa.
+
+## Tipos de função e callbacks
+
+Um tipo de função é escrito `(T) => R`. Closures e funções nomeadas podem ser armazenadas, copiadas, passadas, retornadas, capturadas por outras closures e passadas a imports Rust como callbacks:
+
+```lift
+function double(value: int): int { return value * 2; }
+function apply(value: int, transform: (int) => int): int { return transform(value); }
+function make_adder(amount: int): (int) => int {
+    return (value: int): int => value + amount;
+}
+
+const stored: (int) => int = double;
+console.log(apply(3, stored));   // 6
+console.log(make_adder(2)(10));  // 12
+```
+
+Valores de função geram `Rc<dyn Fn(owned...) -> owned>`, então cópias clonam o `Rc` e callbacks passam com clone barato. Captures continuam snapshots somente leitura. Um parâmetro de import com tipo de função vira `&dyn Fn(...)`, e um callback retornado é `Box<dyn Fn(...)>` convertido para `Rc`. Valores de função são rejeitados em campos de struct, arrays, `Option` e `Result`; métodos não são de primeira classe, e callbacks com capture mutável ou recursos opacos são rejeitados. Consulte [tipos de função e callbacks](docs/higher-order.pt-BR.md) para o contrato completo e o mapeamento FFI.
+
+## Laços
+
+`for (const value of values)` itera um snapshot owned de um array, e `while` mantém o contrato booleano. `break` e `continue` têm como alvo o laço mais interno, inclusive dentro de `try`/`catch`:
+
+```lift
+function first_positive(values: int[]): int? {
+    for (const value of values) {
+        if value > 0 { return option.some(value); }
+    }
+    return null;
+}
+
+for (let value of [1, 2]) {
+    if value == 2 { break; }
+    console.log(value);
+}
+```
+
+Um binding `const` do laço é somente leitura; `let` permite reatribuir o binding sem mutar o array de origem. O array é clonado uma vez antes da iteração, então mutações posteriores não são observadas, e cada elemento é um valor owned. `break`/`continue` são rejeitados fora de laço e dentro de closures. Um laço nunca conta como retorno da função, então a função continua precisando de `return` final. Não há `for` estilo C, `for...in` sobre índices, labels, ranges ou protocolo de iterator. Veja [laços e controle de laço](docs/loops.pt-BR.md).
+
+## Métodos de array
+
+Arrays expõem métodos higher-order embutidos que recebem callbacks Lift: `map`, `filter`, `find`, `some`, `every`, `forEach` e `reduce`.
+
+```lift
+function double(value: int): int { return value * 2; }
+
+const values = [1, 2, 3, 4];
+const doubled = values.map(double);                 // int[]
+const evens = values.filter((value: int): boolean => value % 2 == 0);
+const first = values.find((value: int): boolean => value > 2); // int?
+const total = values.reduce(0, (accumulator: int, value: int): int => accumulator + value);
+```
+
+O receptor é copiado uma vez, então o array de origem nunca é consumido nem mutado; cada elemento chega ao callback como valor owned. `map` e `filter` retornam novos arrays, `find` retorna `T?`, `some`/`every` fazem curto-circuito, `forEach` retorna `void`, e `reduce` é um fold à esquerda cujo tipo do acumulador vem do valor inicial. Callbacks podem ser closures ou funções nomeadas, e chamadas encadeiam. Método desconhecido, callback com tipo de parâmetro/resultado errado, número errado de argumentos, `find` em `T?[]` ou receptor que não é array são rejeitados antes do codegen. Não há `flatMap`, `sort`, parâmetro de índice, iteradores lazy ou métodos mutantes como `push`. Veja [métodos de array](docs/array-methods.pt-BR.md).
+
+## Match de Option e Result
+
+`match` executa exatamente um braço para um `Option<T>` ou `Result<T, E>`, e as duas variantes são obrigatórias:
+
+```lift
+function describe(value: int?): string {
+    match value {
+        some(present) => { return `some ${present}`; }
+        none => { return "none"; }
+    }
+}
+
+function describe_result(value: Result<int, string>): string {
+    match value {
+        ok(number) => { return `ok ${number}`; }
+        err(error) => { return `err ${error}`; }
+    }
+}
+```
+
+O scrutinee é avaliado uma vez e clonado quando é um place, então o valor original continua utilizável. `some`/`err` ligam um payload owned; `ok()` é a forma de sucesso `void`. Bindings de braço são imutáveis (campos podem ser mutados), e braço ausente ou duplicado é rejeitado. Um match garante retorno quando todos os braços saem, e `break`/`continue` dentro de um braço miram o laço externo. Match de `Result` com recurso opaco é rejeitado; use `?`/`unwrap`. Ainda não há wildcard, guarda, pattern aninhado ou match de union/enum geral. Veja [match de Option e Result](docs/match.pt-BR.md).
 
 ## Valores opcionais
 
@@ -147,7 +238,7 @@ const present = option.some(7);
 console.log(absent ?? present ?? 9);
 ```
 
-`??` avalia a esquerda uma vez e o fallback somente na ausência. `T? ?? T` retorna `T`; `T? ?? T?` continua opcional. `option.is_some` testa e `option.unwrap` clona o payload presente; unwrap na ausência causa panic. `int?[]` é array de opcionais; `int[]?` é array opcional. Campos `T?` continuam obrigatórios. Não há lift implícito, ausência `undefined`, narrowing, campos omitíveis ou Option no FFI. Consulte o [contrato exato](docs/option.pt-BR.md), incluindo limites de inferência e parênteses entre operadores.
+`??` avalia a esquerda uma vez e o fallback somente na ausência. `T? ?? T` retorna `T`; `T? ?? T?` continua opcional. `option.is_some` testa e `option.unwrap` clona o payload presente; unwrap na ausência causa panic. `int?[]` é array de opcionais; `int[]?` é array opcional. Campo `T?` continua obrigatório; campo `nickname?: string` pode ser omitido, e a omissão vira `None`. Dentro de `if value != null`, `if value == null { return; }`, cadeias `else if` e corpos de `while option.is_some(value)`, um `const` ou parâmetro imutável de tipo `T?` estreita para `T`; valores estreitados são clones somente leitura, então mutação e narrowing de `let` são rejeitados e a própria condição não é estreitada. Não há lift implícito, ausência `undefined`, optional chaining ou narrowing de `Result`. Um parâmetro/retorno `T?` direto agora é suportado em imports Rust; Option aninhado em arrays/Result não é. Consulte o [contrato exato](docs/option.pt-BR.md) e o [mapeamento struct/Option na FFI](docs/ffi-structs-and-options.pt-BR.md), incluindo limites de inferência, narrowing e parênteses entre operadores.
 
 ## Entrada e arquivos
 
@@ -173,7 +264,7 @@ if result.is_ok(contents) {
 }
 ```
 
-A inspeção de Result empresta o argumento; unwrap clona o payload para preservar o Result original. Unwrap na variante errada causa panic. Generics gerais, construtores Result, pattern matching, `?` e `try/catch` ainda não foram implementados. Consulte o [contrato Result/I/O](docs/result-and-io.pt-BR.md) para o escopo exato. Exemplo que lê entrada canalizada e grava um arquivo:
+A inspeção de Result empresta o argumento; unwrap clona o payload para preservar o Result original. Unwrap na variante errada causa panic. Valores Result podem ser construídos com `result.ok(value)`/`result.err(error)` (contextuais), propagados com `?` postfix, lançados com `throw` e tratados com `try`/`catch` tipado; tipos de erro precisam coincidir exatamente e não há conversão `From` implícita. Generics gerais, matching geral além de `Option`/`Result`, `finally` e múltiplos catches não foram implementados. Consulte o [contrato Result/I/O](docs/result-and-io.pt-BR.md) e [erros e propagação](docs/errors.pt-BR.md) para o escopo exato. Exemplo que lê entrada canalizada e grava um arquivo:
 
 ```powershell
 "Olá da entrada padrão" | lift run examples/io.lift -- output.txt exemplo
@@ -186,8 +277,11 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 - Uma entrada executável, com módulos flat legados ou pacotes locais `lift.toml`. Forklift suporta dependências path e funções públicas de primitivos/containers; sem registry Lift, dependências remotas, tipos customizados públicos ou reexports nesta etapa.
 - Não há cache completo por chave de conteúdo. Arquivos gerados idênticos são preservados e Cargo reutiliza seus artefatos; análise/codegen continuam executando a cada chamada.
 - A análise de ownership continua conservadora e rejeita alguns padrões complexos de aliasing. Uma passagem privada CFG/liveness remove somente clones comprovadamente de último uso de locais owned diretos; valores emprestados, projeções, usos repetidos no statement e argumentos `ByClone` mantêm cópias. Consulte o [contrato da otimização](docs/liveness.pt-BR.md).
-- Métodos nominais/`impl`, arrow closures locais com snapshot e interpolação de primitivos estão implementados; veja [contratos e limites](docs/methods-closures-templates.pt-BR.md). Unions e `try/catch` continuam pendentes. Option fica fora do FFI e campos opcionais não podem ser omitidos.
-- Result usa `is_ok` e unwrap com cópia; construtores, matching e propagação automática de erros não foram implementados.
+- Métodos nominais/`impl`, arrow closures com snapshot (incluindo callbacks de primeira classe) e interpolação de primitivos estão implementados; veja [contratos e limites](docs/methods-closures-templates.pt-BR.md) e [tipos de função e callbacks](docs/higher-order.pt-BR.md). Unions continuam pendentes. Imports Rust aceitam structs externas, Option direto e parâmetros `Result` emprestados com payload opcional direto; campos opcionais aceitam `?:`/omissão, mas o narrowing cobre apenas bindings imutáveis simples, continuações de guarda, laços e captures de closure.
+- Valores Result usam construtores contextuais `result.ok`/`result.err`, propagação `?`/`throw` com correspondência exata de tipo de erro e `try`/`catch` tipado; `finally`, múltiplos catches, matching geral além de `Option`/`Result` e conversão automática `From` não foram implementados.
+- Laços cobrem `while` e `for...of` sobre arrays com `break`/`continue`; `for` estilo C, labels, ranges, protocolo de iterator e expressões de laço não foram implementados.
+- Métodos de array cobrem `map`, `filter`, `find`, `some`, `every`, `forEach` e `reduce`; `flatMap`, `sort`, parâmetro de índice, iteradores lazy e métodos mutantes como `push` não foram implementados.
+- Matching é limitado a `Option`/`Result`; wildcards, guardas, patterns aninhados e unions/enums de usuário não foram implementados.
 - O [serviço local de notas](examples/notes-service/README.pt-BR.md) declara DTOs, handlers síncronos, rotas e SQL em Lift. A [API de banco](stdlib/lift_db/README.pt-BR.md) oferece pools SQLite/PostgreSQL configuráveis, execute/query parametrizado, resultados materializados e transações owned. O servidor possui o pool e os handlers o emprestam.
 
 O serviço exercita os contratos documentados de SQL/escalares e HTTP estático. Consulte o [plano de compatibilidade de banco](docs/database-compatibility.pt-BR.md) para a matriz de backends/versões e o [contrato de callbacks/HTTP](docs/callbacks-and-web-contract.pt-BR.md) para limites do adaptador.
@@ -196,14 +290,19 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 
 - `examples/fibonacci.lift` — funções recursivas e fluxo de controle.
 - `examples/ownership.lift` — mutação de agregados, empréstimos e valores de retorno owned.
-- `examples/interop.lift` — imports Rust locais e `console.log`.
+- `examples/interop.lift` — imports Rust locais, structs externas, parâmetros/retornos Option e `console.log`.
 - `examples/stdlib.lift` — comprimentos, pertinência, texto Unicode e trim compatíveis com FFI.
 - `examples/io.lift` — argumentos, stdin e leitura/escrita de arquivos UTF-8.
 - `examples/registry.lift` — import de `num-integer` 0.1.46 com versão exata.
 - `examples/modules/main.lift` — módulos recursivos, declarações globais, imports repetidos e ciclos.
 - `examples/liveness.lift` — último uso, joins, retornos, loops e reatribuição validados com compilação Rust.
 - `examples/methods-closures-templates.lift` — mutação do receiver, captures snapshot, templates aninhados e ordem de avaliação.
-- `examples/option.lift` — opcionais, fallbacks encadeados preguiçosos e efeitos exatamente uma vez.
+- `examples/option.lift` — valores opcionais, campos opcionais omitíveis, narrowing de fluxo, fallbacks encadeados preguiçosos e efeitos exatamente uma vez.
+- `examples/errors.lift` — construtores de Result, propagação com `?`, `throw` e `try`/`catch` tipado.
+- `examples/higher-order.lift` — tipos de função, callbacks armazenados/retornados, captures e callbacks FFI.
+- `examples/loops.lift` — `for...of`, `while`, `break`/`continue`, escopo de laço e iteração de arrays.
+- `examples/array-methods.lift` — `map`, `filter`, `find`, `some`, `every`, `forEach`, `reduce`, encadeamento e callbacks.
+- `examples/match.lift` — `match` exaustivo para `Option`, `Result`, sucesso `void` e controle de laço nos braços.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 

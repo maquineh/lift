@@ -70,7 +70,27 @@ fn optional_array_suffixes_and_nullish_associativity_are_explicit() {
         matches!(&binary.left.kind, ExpressionKind::Binary(left) if left.operator == BinaryOperator::Coalesce)
     );
     assert!(parse_source("const value: int?? = null;").is_err());
-    assert!(parse_source("interface User { name?: string }").is_err());
+    let program = parse_source("interface User { name?: string, alias: string? }").unwrap();
+    let Declaration::Interface(interface) = &program.declarations[0] else {
+        panic!("interface")
+    };
+    assert!(interface.fields[0].optional);
+    assert!(matches!(
+        interface.fields[0].ty.kind,
+        TypeExpressionKind::Named(_)
+    ));
+    assert!(!interface.fields[1].optional);
+    assert!(matches!(
+        interface.fields[1].ty.kind,
+        TypeExpressionKind::Optional(_)
+    ));
+    for rejected in [
+        "interface User { name? }",
+        "interface User { name??: string }",
+        "interface User { ?: string }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
 }
 
 #[test]
@@ -140,6 +160,267 @@ fn source_aware_parser_preserves_empty_program_and_eof_error_ids() {
     let errors = lift_parser::parse_with_source(&tokens, id).unwrap_err();
     assert!(errors.iter().all(|error| error.span.source == id));
     assert!(errors.iter().any(|error| error.span.is_empty()));
+}
+
+#[test]
+fn parses_match_option_and_result_patterns() {
+    let source = r#"
+        match value {
+            some(present) => { console.log(present); }
+            none => { console.log(0); }
+        }
+        match result {
+            ok(value) => { console.log(value); }
+            err(error) => { console.log(error); }
+        }
+        match result {
+            ok() => { console.log(0); }
+            err(error) => { console.log(error); }
+        }
+    "#;
+    let program = parse_source(source).expect("match válido");
+    let Declaration::Statement(Statement::Match(first)) = &program.declarations[0] else {
+        panic!("match")
+    };
+    assert_eq!(first.arms.len(), 2);
+    let lift_ast::MatchPatternKind::Some(binding) = &first.arms[0].pattern.kind else {
+        panic!("some")
+    };
+    assert_eq!(binding.name, "present");
+    assert!(matches!(
+        first.arms[1].pattern.kind,
+        lift_ast::MatchPatternKind::None
+    ));
+    let Declaration::Statement(Statement::Match(second)) = &program.declarations[1] else {
+        panic!("match result")
+    };
+    assert!(matches!(
+        second.arms[0].pattern.kind,
+        lift_ast::MatchPatternKind::Ok(Some(_))
+    ));
+    assert!(matches!(
+        second.arms[1].pattern.kind,
+        lift_ast::MatchPatternKind::Err(_)
+    ));
+    let Declaration::Statement(Statement::Match(third)) = &program.declarations[2] else {
+        panic!("match void")
+    };
+    assert!(matches!(
+        third.arms[0].pattern.kind,
+        lift_ast::MatchPatternKind::Ok(None)
+    ));
+
+    for rejected in [
+        "match value { some(x) => console.log(x); none => { console.log(0); } }",
+        "match value { some(x) { console.log(x); } none => { console.log(0); } }",
+        "match value { some(x => { console.log(x); } none => { console.log(0); } }",
+        "match value some(x) => { console.log(x); }",
+        "match value { } }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
+fn parses_for_of_and_loop_control() {
+    let source = r#"
+        for (const value of values) {
+            if value == 0 { continue; }
+            if value > 9 { break; }
+            console.log(value);
+        }
+        for (let index of [1, 2]) {
+            console.log(index);
+        }
+        while true { break; }
+    "#;
+    let program = parse_source(source).expect("laços válidos");
+    let Declaration::Statement(Statement::ForOf(for_of)) = &program.declarations[0] else {
+        panic!("for...of")
+    };
+    assert_eq!(for_of.binding, lift_ast::BindingKind::Const);
+    assert_eq!(for_of.name.name, "value");
+    assert!(matches!(
+        for_of.iterable.kind,
+        ExpressionKind::Identifier(_)
+    ));
+    let branches = for_of
+        .body
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::If(if_) => Some(&if_.then_branch),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(branches
+        .iter()
+        .any(|branch| matches!(branch.statements[0], Statement::Continue(_))));
+    assert!(branches
+        .iter()
+        .any(|branch| matches!(branch.statements[0], Statement::Break(_))));
+    let Declaration::Statement(Statement::ForOf(for_of)) = &program.declarations[1] else {
+        panic!("for...of let")
+    };
+    assert_eq!(for_of.binding, lift_ast::BindingKind::Let);
+    assert_eq!(for_of.name.name, "index");
+    let Declaration::Statement(Statement::While(while_)) = &program.declarations[2] else {
+        panic!("while")
+    };
+    assert!(matches!(while_.body.statements[0], Statement::Break(_)));
+
+    for rejected in [
+        "for (value of [1]) { console.log(value); }",
+        "for (const value in [1]) { console.log(value); }",
+        "for (const value of [1] { console.log(value); }",
+        "for (const value of [1]) { break }",
+        "while true { continue }",
+        "break",
+        "continue",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
+fn parses_function_types_and_higher_order_annotations() {
+    let source = r#"
+        function apply(value: int, transform: (int) => int): (int) => int {
+            return transform;
+        }
+        function call(callback: ((int) => int) => int): int {
+            return callback((value: int): int => value);
+        }
+    "#;
+    let program = parse_source(source).expect("tipos de função válidos");
+    let Declaration::Function(apply) = &program.declarations[0] else {
+        panic!("function")
+    };
+    let TypeExpressionKind::Function(parameters, result) = &apply.parameters[1].ty.kind else {
+        panic!("parâmetro de função")
+    };
+    assert_eq!(parameters.len(), 1);
+    assert!(matches!(parameters[0].kind, TypeExpressionKind::Named(_)));
+    assert!(matches!(result.kind, TypeExpressionKind::Named(_)));
+    let TypeExpressionKind::Function(_, _) = &apply.return_type.as_ref().unwrap().kind else {
+        panic!("retorno de função")
+    };
+    let Declaration::Function(call) = &program.declarations[1] else {
+        panic!("function")
+    };
+    let TypeExpressionKind::Function(parameters, _) = &call.parameters[0].ty.kind else {
+        panic!("callback de callback")
+    };
+    assert!(matches!(
+        parameters[0].kind,
+        TypeExpressionKind::Function(_, _)
+    ));
+    let closure = parse_source("const f = (callback: (int) => int): int => callback(1);").unwrap();
+    let Declaration::Statement(Statement::Variable(variable)) = &closure.declarations[0] else {
+        panic!("variable")
+    };
+    let ExpressionKind::Closure(closure) = &variable.initializer.kind else {
+        panic!("closure")
+    };
+    assert!(matches!(
+        closure.parameters[0].ty.kind,
+        TypeExpressionKind::Function(_, _)
+    ));
+
+    for rejected in [
+        "function f(callback: (int) => ): void {}",
+        "function f(callback: (int): int): void {}",
+        "function f(callback: (int => int)): void {}",
+        "function f(callback: ((int) => int)[]): void {}",
+        "function f(callback: (int) => int)?: void {}",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
+fn parses_try_throw_and_postfix_try_operator() {
+    let source = r#"
+        function f(value: int): Result<int, string> {
+            try {
+                const parsed = g(value)?;
+                throw "x";
+            } catch (error: string) {
+                return result.err(error);
+            }
+            return result.ok(0);
+        }
+    "#;
+    let program = parse_source(source).expect("try/catch, throw e ? válidos");
+    let Declaration::Function(function) = &program.declarations[0] else {
+        panic!("function")
+    };
+    let Statement::TryCatch(statement) = &function.body.statements[0] else {
+        panic!("try")
+    };
+    assert_eq!(statement.catch_name.name, "error");
+    let Statement::Variable(variable) = &statement.body.statements[0] else {
+        panic!("const do try")
+    };
+    assert!(matches!(
+        variable.initializer.kind,
+        ExpressionKind::TryPropagate(_)
+    ));
+    assert!(matches!(statement.body.statements[1], Statement::Throw(_)));
+    let Statement::Return(_) = &statement.catch_body.statements[0] else {
+        panic!("return no catch")
+    };
+
+    let program = parse_source("const value = f()? + 1;").unwrap();
+    let Declaration::Statement(Statement::Variable(variable)) = &program.declarations[0] else {
+        panic!("variable")
+    };
+    let ExpressionKind::Binary(binary) = &variable.initializer.kind else {
+        panic!("binary")
+    };
+    assert_eq!(binary.operator, BinaryOperator::Add);
+    assert!(matches!(binary.left.kind, ExpressionKind::TryPropagate(_)));
+
+    for rejected in [
+        "function f(): void { try { } }",
+        "function f(): void { try { } catch (error) { } }",
+        "function f(): void { try { } catch (error: int { } }",
+        "function f(): void { catch (error: int) { } }",
+        "function f(): void { throw 1 }",
+        "function f(): void { throw; }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
+fn parses_imported_interface_layouts_and_rejects_invalid_destinations() {
+    let source = r#"import interface Range { start: int, note?: string } from "sample@1.0.0::geometry::Range";"#;
+    let program = parse_source(source).expect("layout externo válido");
+    let Declaration::ImportInterface(import) = &program.declarations[0] else {
+        panic!("import interface")
+    };
+    assert_eq!(import.name.name, "Range");
+    assert_eq!(import.fields.len(), 2);
+    assert_eq!(import.fields[0].name.name, "start");
+    assert!(!import.fields[0].optional);
+    assert!(import.fields[1].optional);
+    assert_eq!(import.source, "sample@1.0.0::geometry::Range");
+    assert_eq!(
+        &source[import.source_span.start..import.source_span.end],
+        "\"sample@1.0.0::geometry::Range\""
+    );
+    assert_eq!(import.span.end, source.len());
+    for rejected in [
+        r#"import interface Range { start: int } "sample@1.0.0::Range";"#,
+        r#"import interface Range { start: int } from ;"#,
+        r#"import interface Range { start: int } from "sample@1.0.0::Range" as extra;"#,
+        r#"import interface Range { start: int } from "sample@1.0.0::Range""#,
+        r#"import interface Range from "sample@1.0.0::Range";"#,
+        r#"import interface { start: int } from "sample@1.0.0::Range";"#,
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
 }
 
 #[test]

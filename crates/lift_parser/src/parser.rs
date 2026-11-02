@@ -4,12 +4,14 @@
 
 use lift_ast::{
     ArrayLiteral, AssignmentStatement, BinaryExpression, BinaryOperator, BindingKind, Block,
-    CallExpression, Declaration, ElseBranch, ElseBranchKind, Expression, ExpressionKind,
-    ExpressionStatement, FieldAccessExpression, FunctionDeclaration, Identifier, IfStatement,
-    ImportFunctionDeclaration, IndexExpression, InterfaceDeclaration, InterfaceField,
-    ModuleImportDeclaration, ObjectField, ObjectLiteral, Parameter, ProgramAst, ReturnStatement,
-    SourceId, Span, Statement, TypeExpression, TypeExpressionKind, UnaryExpression, UnaryOperator,
-    VariableDeclaration, WhileStatement,
+    BreakStatement, CallExpression, ContinueStatement, Declaration, ElseBranch, ElseBranchKind,
+    Expression, ExpressionKind, ExpressionStatement, FieldAccessExpression, ForOfStatement,
+    FunctionDeclaration, Identifier, IfStatement, ImportFunctionDeclaration,
+    ImportInterfaceDeclaration, IndexExpression, InterfaceDeclaration, InterfaceField, MatchArm,
+    MatchPattern, MatchPatternKind, MatchStatement, ModuleImportDeclaration, ObjectField,
+    ObjectLiteral, Parameter, ProgramAst, ReturnStatement, SourceId, Span, Statement,
+    ThrowStatement, TryCatchStatement, TypeExpression, TypeExpressionKind, UnaryExpression,
+    UnaryOperator, VariableDeclaration, WhileStatement,
 };
 use lift_lexer::Token;
 
@@ -151,6 +153,10 @@ impl<'tokens> Parser<'tokens> {
             Some(Token::Import) if self.check_n(1, is_module) => {
                 self.parse_module_import().map(Declaration::ModuleImport)
             }
+            Some(Token::Import) if self.check_n(1, |token| matches!(token, Token::Interface)) => {
+                self.parse_import_interface()
+                    .map(Declaration::ImportInterface)
+            }
             Some(Token::Import) => self.parse_import().map(Declaration::Import),
             Some(Token::Interface) => self
                 .parse_interface_declaration()
@@ -183,16 +189,31 @@ impl<'tokens> Parser<'tokens> {
         let start = self.expect(is_interface, "`interface`")?.start;
         let name = self.parse_identifier()?;
         self.expect(is_left_brace, "`{`")?;
+        let (fields, close) = self.parse_interface_fields()?;
+        Ok(InterfaceDeclaration {
+            name,
+            fields,
+            span: self.span(start, close),
+        })
+    }
+
+    /// Campos até `}`, incluindo o fim do fechamento.
+    /// PT-BR: campos de interface até `}` e o offset final.
+    fn parse_interface_fields(&mut self) -> Result<(Vec<InterfaceField>, usize), ParseError> {
         let mut fields = Vec::new();
 
         while !self.check(is_right_brace) && !self.is_at_end() {
             let field_start = self.current_span().start;
             let field_name = self.parse_identifier()?;
+            let optional = self
+                .consume(|token| matches!(token, Token::Question))
+                .is_some();
             self.expect(is_colon, "`:`")?;
             let ty = self.parse_type()?;
             let field_span = self.span(field_start, ty.span.end);
             fields.push(InterfaceField {
                 name: field_name,
+                optional,
                 ty,
                 span: field_span,
             });
@@ -209,11 +230,32 @@ impl<'tokens> Parser<'tokens> {
             }
         }
 
-        let close = self.expect(is_right_brace, "`}`")?;
-        Ok(InterfaceDeclaration {
+        let close = self.expect(is_right_brace, "`}`")?.end;
+        Ok((fields, close))
+    }
+
+    fn parse_import_interface(&mut self) -> Result<ImportInterfaceDeclaration, ParseError> {
+        let start = self
+            .expect(|token| matches!(token, Token::Import), "`import`")?
+            .start;
+        self.expect(is_interface, "`interface`")?;
+        let name = self.parse_identifier()?;
+        self.expect(is_left_brace, "`{`")?;
+        let (fields, _) = self.parse_interface_fields()?;
+        self.expect(|token| matches!(token, Token::From), "`from`")?;
+        let source_span = self.current_span();
+        let source = match self.current() {
+            Some(Token::StringLiteral(source)) => source.clone(),
+            _ => return Err(self.error("caminho Rust do tipo entre aspas")),
+        };
+        self.advance();
+        let end = self.expect(is_semicolon, "`;`")?.end;
+        Ok(ImportInterfaceDeclaration {
             name,
             fields,
-            span: self.span(start, close.end),
+            source,
+            source_span,
+            span: self.span(start, end),
         })
     }
 
@@ -303,6 +345,9 @@ impl<'tokens> Parser<'tokens> {
     }
 
     fn parse_type(&mut self) -> Result<TypeExpression, ParseError> {
+        if self.check(is_left_paren) {
+            return self.parse_function_type();
+        }
         let mut ty = self.parse_named_type()?;
 
         loop {
@@ -324,6 +369,27 @@ impl<'tokens> Parser<'tokens> {
         }
 
         Ok(ty)
+    }
+
+    /// `(T, U) => R`: tipo de função usado por callbacks e valores de função.
+    fn parse_function_type(&mut self) -> Result<TypeExpression, ParseError> {
+        let start = self.expect(is_left_paren, "`(`")?.start;
+        let mut parameters = Vec::new();
+        if !self.check(is_right_paren) {
+            loop {
+                parameters.push(self.parse_type()?);
+                if self.consume(is_comma).is_none() || self.check(is_right_paren) {
+                    break;
+                }
+            }
+        }
+        self.expect(is_right_paren, "`)`")?;
+        self.expect(|token| matches!(token, Token::Arrow), "`=>`")?;
+        let result = self.parse_type()?;
+        Ok(TypeExpression {
+            span: self.span(start, result.span.end),
+            kind: TypeExpressionKind::Function(parameters, Box::new(result)),
+        })
     }
 
     fn parse_named_type(&mut self) -> Result<TypeExpression, ParseError> {
@@ -390,7 +456,13 @@ impl<'tokens> Parser<'tokens> {
             Some(Token::Let) => self.parse_variable_declaration(BindingKind::Let),
             Some(Token::If) => self.parse_if_statement().map(Statement::If),
             Some(Token::While) => self.parse_while_statement().map(Statement::While),
+            Some(Token::Match) => self.parse_match_statement().map(Statement::Match),
+            Some(Token::For) => self.parse_for_of_statement().map(Statement::ForOf),
+            Some(Token::Break) => self.parse_break_statement().map(Statement::Break),
+            Some(Token::Continue) => self.parse_continue_statement().map(Statement::Continue),
             Some(Token::Return) => self.parse_return_statement().map(Statement::Return),
+            Some(Token::Throw) => self.parse_throw_statement().map(Statement::Throw),
+            Some(Token::Try) => self.parse_try_catch_statement().map(Statement::TryCatch),
             _ => self.parse_assignment_or_expression_statement(),
         }
     }
@@ -474,6 +546,154 @@ impl<'tokens> Parser<'tokens> {
         })
     }
 
+    /// `match valor { some(x) => {...} none => {...} }`; braços exaustivos.
+    fn parse_match_statement(&mut self) -> Result<MatchStatement, ParseError> {
+        let start = self.expect(is_match, "`match`")?.start;
+        let value = self.parse_expression(0)?;
+        self.expect(is_left_brace, "`{`")?;
+        let mut arms = Vec::new();
+        while !self.check(is_right_brace) && !self.is_at_end() {
+            let arm_start = self.current_span().start;
+            let pattern = self.parse_match_pattern()?;
+            self.expect(|token| matches!(token, Token::Arrow), "`=>`")?;
+            let body = self.parse_block()?;
+            let span = self.span(arm_start, body.span.end);
+            arms.push(MatchArm {
+                pattern,
+                body,
+                span,
+            });
+            self.consume(is_comma);
+        }
+        let close = self.expect(is_right_brace, "`}`")?;
+        Ok(MatchStatement {
+            value,
+            arms,
+            span: self.span(start, close.end),
+        })
+    }
+
+    fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
+        let start = self.current_span().start;
+        let word = match self.current() {
+            Some(Token::Identifier(word)) => word.clone(),
+            _ => {
+                return Err(self.error("pattern `some(nome)`, `none`, `ok(nome)` ou `err(nome)`"));
+            }
+        };
+        self.advance();
+        let kind = match word.as_str() {
+            "some" => {
+                self.expect(is_left_paren, "`(`")?;
+                let name = self.parse_pattern_binding()?;
+                self.expect(is_right_paren, "`)`")?;
+                MatchPatternKind::Some(name)
+            }
+            "none" => MatchPatternKind::None,
+            "ok" => {
+                self.expect(is_left_paren, "`(`")?;
+                if self.check(is_right_paren) {
+                    self.advance();
+                    MatchPatternKind::Ok(None)
+                } else {
+                    let name = self.parse_pattern_binding()?;
+                    self.expect(is_right_paren, "`)`")?;
+                    MatchPatternKind::Ok(Some(name))
+                }
+            }
+            "err" => {
+                self.expect(is_left_paren, "`(`")?;
+                let name = self.parse_pattern_binding()?;
+                self.expect(is_right_paren, "`)`")?;
+                MatchPatternKind::Err(name)
+            }
+            _ => {
+                return Err(self.error("pattern `some(nome)`, `none`, `ok(nome)` ou `err(nome)`"));
+            }
+        };
+        Ok(MatchPattern {
+            kind,
+            span: self.span(start, self.previous_span().end),
+        })
+    }
+
+    fn parse_pattern_binding(&mut self) -> Result<Identifier, ParseError> {
+        match self.current() {
+            Some(Token::Identifier(name)) => {
+                let span = self.current_span();
+                let name = name.clone();
+                self.advance();
+                Ok(Identifier { name, span })
+            }
+            _ => Err(self.error("nome do binding")),
+        }
+    }
+
+    fn previous_span(&self) -> Span {
+        self.tokens
+            .get(self.cursor.saturating_sub(1))
+            .map(|(_, span)| *span)
+            .unwrap_or_else(|| self.current_span())
+    }
+
+    /// `for (const item of values) { ... }`; `of` é contextual.
+    fn parse_for_of_statement(&mut self) -> Result<ForOfStatement, ParseError> {
+        let start = self.expect(is_for, "`for`")?.start;
+        self.expect(is_left_paren, "`(`")?;
+        let binding = match self.current() {
+            Some(Token::Const) => {
+                self.advance();
+                BindingKind::Const
+            }
+            Some(Token::Let) => {
+                self.advance();
+                BindingKind::Let
+            }
+            _ => return Err(self.error("`const` ou `let`")),
+        };
+        let (name, name_span) = match self.current() {
+            Some(Token::Identifier(name)) => (name.clone(), self.current_span()),
+            _ => return Err(self.error("nome do binding")),
+        };
+        self.advance();
+        match self.current() {
+            Some(Token::Identifier(word)) if word == "of" => {
+                self.advance();
+            }
+            _ => return Err(self.error("`of`")),
+        }
+        let iterable = self.parse_expression(0)?;
+        self.expect(is_right_paren, "`)`")?;
+        let body = self.parse_block()?;
+        let span = self.span(start, body.span.end);
+        Ok(ForOfStatement {
+            binding,
+            name: Identifier {
+                name,
+                span: name_span,
+            },
+            iterable,
+            body,
+            span,
+        })
+    }
+
+    fn parse_break_statement(&mut self) -> Result<BreakStatement, ParseError> {
+        let start = self.expect(is_break, "`break`")?.start;
+        let end = self.expect(is_semicolon, "`;`")?.end;
+        Ok(BreakStatement {
+            span: self.span(start, end),
+        })
+    }
+
+    fn parse_continue_statement(&mut self) -> Result<ContinueStatement, ParseError> {
+        let start = self.expect(is_continue, "`continue`")?.start;
+        let end = self.expect(is_semicolon, "`;`")?.end;
+        Ok(ContinueStatement {
+            span: self.span(start, end),
+        })
+    }
+
     fn parse_return_statement(&mut self) -> Result<ReturnStatement, ParseError> {
         let start_span = self.expect(is_return, "`return`")?;
         let value = if self.current().is_some_and(can_start_expression) {
@@ -490,6 +710,35 @@ impl<'tokens> Parser<'tokens> {
         Ok(ReturnStatement {
             value,
             span: self.span(start_span.start, end),
+        })
+    }
+
+    fn parse_throw_statement(&mut self) -> Result<ThrowStatement, ParseError> {
+        let start = self.expect(is_throw, "`throw`")?.start;
+        let value = self.parse_expression(0)?;
+        let end = self.expect(is_semicolon, "`;`")?.end;
+        Ok(ThrowStatement {
+            value,
+            span: self.span(start, end),
+        })
+    }
+
+    fn parse_try_catch_statement(&mut self) -> Result<TryCatchStatement, ParseError> {
+        let start = self.expect(is_try, "`try`")?.start;
+        let body = self.parse_block()?;
+        self.expect(is_catch, "`catch`")?;
+        self.expect(is_left_paren, "`(`")?;
+        let catch_name = self.parse_identifier()?;
+        self.expect(is_colon, "`:`")?;
+        let catch_type = self.parse_type()?;
+        self.expect(is_right_paren, "`)`")?;
+        let catch_body = self.parse_block()?;
+        Ok(TryCatchStatement {
+            span: self.span(start, catch_body.span.end),
+            body,
+            catch_name,
+            catch_type,
+            catch_body,
         })
     }
 
@@ -853,13 +1102,24 @@ impl<'tokens> Parser<'tokens> {
                     span,
                 })
             }
+            Some(Token::Question) => {
+                let question = self.current_span();
+                self.advance();
+                let span = self.span(left.span.start, question.end);
+                Ok(Expression {
+                    kind: ExpressionKind::TryPropagate(Box::new(left)),
+                    span,
+                })
+            }
             _ => Err(self.error("operador postfix")),
         }
     }
 
     fn postfix_binding_power(&self) -> Option<u8> {
         match self.current() {
-            Some(Token::Dot | Token::LeftParen | Token::LeftBracket) => Some(POSTFIX_BINDING_POWER),
+            Some(Token::Dot | Token::LeftParen | Token::LeftBracket | Token::Question) => {
+                Some(POSTFIX_BINDING_POWER)
+            }
             _ => None,
         }
     }
@@ -1005,7 +1265,16 @@ impl<'tokens> Parser<'tokens> {
 
     fn is_recovery_keyword(&self, in_block: bool) -> bool {
         match self.current() {
-            Some(Token::Const | Token::Let | Token::If | Token::While | Token::Return) => true,
+            Some(
+                Token::Const
+                | Token::Let
+                | Token::If
+                | Token::While
+                | Token::For
+                | Token::Break
+                | Token::Continue
+                | Token::Return,
+            ) => true,
             Some(Token::Function | Token::Interface | Token::Import) => !in_block,
             _ => false,
         }
@@ -1115,8 +1384,29 @@ fn is_else(token: &Token) -> bool {
 fn is_while(token: &Token) -> bool {
     matches!(token, Token::While)
 }
+fn is_match(token: &Token) -> bool {
+    matches!(token, Token::Match)
+}
+fn is_for(token: &Token) -> bool {
+    matches!(token, Token::For)
+}
+fn is_break(token: &Token) -> bool {
+    matches!(token, Token::Break)
+}
+fn is_continue(token: &Token) -> bool {
+    matches!(token, Token::Continue)
+}
 fn is_return(token: &Token) -> bool {
     matches!(token, Token::Return)
+}
+fn is_try(token: &Token) -> bool {
+    matches!(token, Token::Try)
+}
+fn is_catch(token: &Token) -> bool {
+    matches!(token, Token::Catch)
+}
+fn is_throw(token: &Token) -> bool {
+    matches!(token, Token::Throw)
 }
 fn is_colon(token: &Token) -> bool {
     matches!(token, Token::Colon)

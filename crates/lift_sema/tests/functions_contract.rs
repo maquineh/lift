@@ -89,8 +89,6 @@ fn nested_parameters_are_bound_and_owned_parameters_forward_mutation() {
 #[test]
 fn rejects_unsupported_closure_and_template_ownership_patterns() {
     for source in [
-        "let f = (): int => 1;",
-        "const f = (): int => 1; const copy = f;",
         "const f = (): int => 1; const xs = [f];",
         "const f = (): int => 1; const x = option.some(f);",
         "const f = (): int => 1; const eq = f == f;",

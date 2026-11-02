@@ -60,23 +60,28 @@ reatribuição direta de parâmetros.
 
 Nomes locais livres são resolvidos lexicalmente na construção. Captures são
 **snapshots owned independentes**: cópia de primitivos e clone explícito de
-strings, structs, arrays, Option e Result. Isso difere intencionalmente dos
-bindings vivos capturados pelo TypeScript. Mudanças posteriores no binding ou
-nas projeções externas não aparecem na closure. Captures não admitem atribuição
-nem mutação, inclusive via método/função mutante. `this` dentro de arrow é um
-snapshot do receiver externo. Funções globais continuam chamadas diretamente;
-não se tornam valores capturados. Capturar outra closure, recursão pelo nome
-local, reatribuir/copiar closures, armazená-las em campos/arrays, retorná-las,
-recebê-las como callbacks, tipos de função em anotações e closures FFI são
-rejeitados. Adapters map/filter/find com callback continuam exclusivos de Rust.
-Closures aninhadas podem capturar valores comuns.
+strings, structs, arrays, Option, Result e valores de função (que clonam seu `Rc`).
+Isso difere intencionalmente dos bindings vivos capturados pelo TypeScript.
+Mudanças posteriores no binding ou nas projeções externas não aparecem na closure.
+Captures não admitem atribuição nem mutação, inclusive via método/função mutante.
+`this` dentro de arrow é um snapshot do receiver externo. Funções globais continuam
+chamadas diretamente; um nome de função em posição de valor vira um wrapper de
+callback. Capturar outra closure é suportado clonando seu `Rc`, e closures podem
+ser reatribuídas/copiadas, armazenadas/retornadas e recebidas como parâmetros de
+tipo função; tipos de função em anotações e callbacks FFI estão em
+[tipos de função e callbacks](higher-order.pt-BR.md). Recursão pelo nome local da
+closure e closures em campos/arrays/Option/Result continuam rejeitadas. Adapters
+map/filter/find com callback continuam exclusivos de Rust. Closures aninhadas
+podem capturar valores comuns ou callbacks.
 
 O HIR registra assinatura, corpo tipado, IDs dos parâmetros e ID próprio de cada
-capture com inicializador owned/CloneMode explícito. Rust emite `move` closure.
-A checagem evita consumir captures no corpo, preservando chamadas repetidas.
-Liveness observa inicializadores na construção e nunca visita o corpo adiado no
-CFG externo; o corpo mantém clones conservadores sem empréstimo do frame externo
-nem moves de último uso calculados para o chamador.
+capture com inicializador owned/CloneMode explícito. Rust emite um valor
+`Rc<dyn Fn>` embrulhando uma closure `move`. A checagem evita consumir captures no
+corpo, preservando chamadas repetidas. Liveness observa inicializadores na
+construção e nunca visita o corpo adiado no CFG externo; o corpo mantém clones
+conservadores sem empréstimo do frame externo nem moves de último uso calculados
+para o chamador. Tipos de função/callbacks, incluindo cópias e callbacks FFI,
+seguem [seu contrato](higher-order.pt-BR.md).
 
 ## Template strings
 

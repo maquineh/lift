@@ -1,0 +1,56 @@
+// EN: for...of iteration, while, break/continue, and loop scoping.
+// PT-BR: iteração for...of, while, break/continue e escopo de laço.
+function sum(values: int[]): int {
+    let total = 0;
+    for (const value of values) {
+        total = total + value;
+    }
+    return total;
+}
+
+function first_positive(values: int[]): int? {
+    for (const value of values) {
+        if value > 0 { return option.some(value); }
+    }
+    return null;
+}
+
+function count_before(values: int[], limit: int): int {
+    let count = 0;
+    for (const value of values) {
+        if value == limit { break; }
+        if value < 0 { continue; }
+        count = count + 1;
+    }
+    return count;
+}
+
+function attempts_needed(target: int): int {
+    let attempts = 0;
+    while true {
+        attempts = attempts + 1;
+        if attempts >= target { break; }
+    }
+    return attempts;
+}
+
+interface Item { value: int }
+
+const values = [1, -2, 3, 4];
+console.log(sum(values));
+console.log(first_positive(values) ?? -1);
+console.log(count_before(values, 4));
+console.log(attempts_needed(3));
+const items: Item[] = [{ value: 7 }, { value: 8 }];
+for (const item of items) {
+    console.log(item.value);
+}
+let index = 0;
+while index < 5 {
+    index = index + 1;
+    if index == 2 { continue; }
+    console.log(index);
+}
+for (const value of [10, 20]) {
+    console.log(value);
+}

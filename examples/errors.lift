@@ -1,0 +1,93 @@
+// EN: Result constructors, `?` propagation, `throw`, and try/catch.
+// PT-BR: Construtores de Result, propagação com `?`, `throw` e try/catch.
+import interface IntRange {
+    start: int,
+    end: int,
+} from "lift_core::interop::IntRange";
+import function maybe_parse(text: string): Result<int?, string> from "lift_core::interop::maybe_parse";
+import function try_range(start: int): Result<IntRange, string> from "lift_core::interop::try_range";
+
+// EN: `?` propagates the `string` error to the Result return; `throw` creates one.
+// PT-BR: `?` propaga o erro `string` ao retorno Result; `throw` cria um.
+function parse_positive(text: string): Result<int, string> {
+    const parsed = maybe_parse(text)?;
+    const value = parsed ?? 0;
+    if value <= 0 { throw "not positive"; }
+    return result.ok(value);
+}
+
+// EN: Inside try, `?` targets the catch instead of the function return.
+// PT-BR: Dentro de try, `?` tem como alvo o catch em vez do retorno da função.
+function describe(text: string): string {
+    try {
+        const value = parse_positive(text)?;
+        return `ok ${value}`;
+    } catch (error: string) {
+        return `error ${error}`;
+    }
+}
+
+function length_or(text: string, fallback: int): int {
+    try {
+        const positive = parse_positive(text)?;
+        const range = try_range(positive)?;
+        return range.end - range.start;
+    } catch (error: string) {
+        console.log(error);
+        return fallback;
+    }
+}
+
+// EN: A catch with a different error type does not capture the string error.
+// PT-BR: Um catch com outro tipo de erro não captura o erro string.
+function skip_catch(text: string): Result<int, string> {
+    try {
+        const value = parse_positive(text)?;
+        console.log(`unreachable ${value}`);
+    } catch (_error: int) {
+        return result.ok(-1);
+    }
+    return result.ok(0);
+}
+
+// EN: `return` inside try returns from the function and skips the catch.
+// PT-BR: `return` dentro de try retorna da função e ignora o catch.
+function early(value: int): Result<int, string> {
+    try {
+        if value < 0 { return result.err("negative"); }
+        return result.ok(value * 2);
+    } catch (error: string) {
+        return result.err("caught");
+    }
+}
+
+// EN: `throw` inside catch targets the enclosing Result return.
+// PT-BR: `throw` dentro do catch tem como alvo o retorno Result externo.
+function rethrow(text: string): Result<int, string> {
+    try {
+        const value = parse_positive(text)?;
+        return result.ok(value);
+    } catch (error: string) {
+        throw error + "!";
+    }
+}
+
+function nothing(): Result<void, string> { return result.ok(); }
+
+function chained(): Result<void, string> {
+    nothing()?;
+    return result.ok();
+}
+
+console.log(describe("42"));
+console.log(describe("abc"));
+console.log(describe("0"));
+console.log(length_or("5", -1));
+console.log(length_or("bad", -1));
+const skipped = skip_catch("abc");
+if result.is_ok(skipped) { console.log(result.unwrap(skipped)); } else { console.log(result.unwrap_err(skipped)); }
+console.log(result.unwrap(early(3)));
+console.log(result.unwrap_err(early(-1)));
+console.log(result.unwrap_err(rethrow("abc")));
+console.log(result.is_ok(nothing()));
+console.log(result.is_ok(chained()));

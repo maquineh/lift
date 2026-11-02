@@ -63,18 +63,22 @@ fn result_values_have_typed_borrowed_inspection_and_owned_payloads() {
 }
 
 #[test]
-fn result_rejects_invalid_payloads_ffi_parameters_and_direct_struct_cycles() {
+fn result_rejects_invalid_payloads_and_direct_struct_cycles_and_accepts_ffi_parameters() {
     for source in [
         "function f(value: Result<string, void>): void {}",
         "function f(value: Result<void[], string>): void {}",
-        r#"import function f(value: Result<int, string>): void from "sample@1.0.0::f";"#,
         r#"import function f(): Result<Result<int, string>, string> from "sample@1.0.0::f";"#,
+        r#"import function f(value: Result<void, string>): void from "sample@1.0.0::f";"#,
         "result.is_ok(1);",
         "result.unwrap();",
         "const result = 1; result.unwrap(1);",
     ] {
         assert!(analyze_source(source).is_err(), "{source}");
     }
+    analyze_source(
+        r#"import function f(value: Result<int, string>): Result<int, string> from "sample@1.0.0::f";"#,
+    )
+    .unwrap();
     let errors = analyze_source("interface Node { next: Result<Node, string> }").unwrap_err();
     assert!(errors
         .iter()

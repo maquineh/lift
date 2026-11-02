@@ -87,6 +87,9 @@ impl Visitor {
                     .push((variable.id, variable.name.clone(), variable.span));
                 self.expression(&variable.initializer);
             }
+            HirStatement::Narrow(_) => {
+                // Binding interno do compilador: sem diagnóstico de uso.
+            }
             HirStatement::Assignment(assignment) => {
                 // A write counts as a reference: no speculative dead-store analysis.
                 // PT-BR: Escrita conta como referência; não inferimos dead stores.
@@ -98,10 +101,43 @@ impl Visitor {
                 self.condition(&loop_.condition);
                 self.block(&loop_.body);
             }
+            HirStatement::ForOf(loop_) => {
+                self.bindings
+                    .push((loop_.id, loop_.name.clone(), loop_.span));
+                self.expression(&loop_.iterable);
+                self.block(&loop_.body);
+            }
+            HirStatement::Match(match_) => {
+                self.expression(&match_.value);
+                for arm in &match_.arms {
+                    match &arm.pattern {
+                        lift_sema::HirMatchPattern::Some(binding)
+                        | lift_sema::HirMatchPattern::Err(binding) => {
+                            self.bindings
+                                .push((binding.id, binding.name.clone(), binding.span));
+                        }
+                        lift_sema::HirMatchPattern::Ok(Some(binding)) => {
+                            self.bindings
+                                .push((binding.id, binding.name.clone(), binding.span));
+                        }
+                        lift_sema::HirMatchPattern::None | lift_sema::HirMatchPattern::Ok(None) => {
+                        }
+                    }
+                    self.block(&arm.body);
+                }
+            }
+            HirStatement::Break(_) | HirStatement::Continue(_) => {}
             HirStatement::Return(ret) => {
                 if let Some(expr) = &ret.value {
                     self.expression(expr);
                 }
+            }
+            HirStatement::Throw(value) => self.expression(&value.value),
+            HirStatement::TryCatch(unless) => {
+                self.bindings
+                    .push((unless.catch_id, unless.catch_name.clone(), unless.span));
+                self.block(&unless.body);
+                self.block(&unless.catch_body);
             }
             HirStatement::Expression(statement) => {
                 let mut inner = &statement.expression;
@@ -150,6 +186,18 @@ impl Visitor {
                     self.expression(argument);
                 }
             }
+            HirExprKind::ArrayMethod {
+                array,
+                callback,
+                initial,
+                ..
+            } => {
+                self.expression(array);
+                self.expression(callback);
+                if let Some(initial) = initial {
+                    self.expression(initial);
+                }
+            }
             HirExprKind::OptionSome(value)
             | HirExprKind::Grouping(value)
             | HirExprKind::Move(value)
@@ -157,6 +205,12 @@ impl Visitor {
                 expression: value, ..
             }
             | HirExprKind::Unary { operand: value, .. } => self.expression(value),
+            HirExprKind::FunctionValue { .. } => {}
+            HirExprKind::ResultOk(Some(value)) | HirExprKind::ResultErr(value) => {
+                self.expression(value)
+            }
+            HirExprKind::ResultOk(None) => {}
+            HirExprKind::TryPropagate { expression, .. } => self.expression(expression),
             HirExprKind::Coalesce {
                 option, fallback, ..
             } => {

@@ -68,6 +68,7 @@ fn expressions(program: &HirProgram) -> Vec<&HirExpr> {
     fn statement<'a>(value: &'a HirStatement, out: &mut Vec<&'a HirExpr>) {
         match value {
             HirStatement::Variable(value) => expression(&value.initializer, out),
+            HirStatement::Narrow(_) => {}
             HirStatement::Assignment(value) => {
                 expression(&value.target, out);
                 expression(&value.value, out);
@@ -82,6 +83,30 @@ fn expressions(program: &HirProgram) -> Vec<&HirExpr> {
             HirStatement::While(value) => {
                 expression(&value.condition, out);
                 for value in &value.body.statements {
+                    statement(value, out);
+                }
+            }
+            HirStatement::ForOf(value) => {
+                expression(&value.iterable, out);
+                for value in &value.body.statements {
+                    statement(value, out);
+                }
+            }
+            HirStatement::Match(value) => {
+                expression(&value.value, out);
+                for arm in &value.arms {
+                    for value in &arm.body.statements {
+                        statement(value, out);
+                    }
+                }
+            }
+            HirStatement::Break(_) | HirStatement::Continue(_) => {}
+            HirStatement::Throw(value) => expression(&value.value, out),
+            HirStatement::TryCatch(value) => {
+                for value in &value.body.statements {
+                    statement(value, out);
+                }
+                for value in &value.catch_body.statements {
                     statement(value, out);
                 }
             }

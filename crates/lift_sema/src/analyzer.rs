@@ -6,16 +6,19 @@ use std::collections::{HashMap, HashSet};
 
 use lift_ast::{
     ArrayLiteral, AssignmentStatement, BinaryOperator, BindingKind, Block, Declaration,
-    ElseBranchKind, Expression, ExpressionKind, FunctionDeclaration, Identifier, ProgramAst, Span,
-    Statement, TypeExpression, TypeExpressionKind, UnaryOperator,
+    ElseBranchKind, Expression, ExpressionKind, FunctionDeclaration, Identifier,
+    ImportInterfaceDeclaration, ProgramAst, Span, Statement, TypeExpression, TypeExpressionKind,
+    UnaryOperator,
 };
 
 use crate::{
-    ArgPassMode, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode, HirAssignment,
-    HirBlock, HirCallArgument, HirDeclaration, HirElseBranch, HirExpr, HirExprKind,
-    HirExpressionStatement, HirFunction, HirIf, HirImport, HirParameter, HirProgram, HirReturn,
-    HirStatement, HirStruct, HirStructField, HirStructInitField, HirVariableDeclaration, HirWhile,
-    ParameterPassMode, ResolvedType, RustDependency, SemaError, SemaErrorKind, CONSOLE_LOG_BUILTIN,
+    ArgPassMode, ArrayMethodKind, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode,
+    HirAssignment, HirBlock, HirBreak, HirCallArgument, HirContinue, HirDeclaration, HirElseBranch,
+    HirExpr, HirExprKind, HirExpressionStatement, HirExternStruct, HirForOf, HirFunction, HirIf,
+    HirImport, HirMatch, HirMatchArm, HirMatchBinding, HirMatchPattern, HirNarrowing, HirParameter,
+    HirProgram, HirReturn, HirStatement, HirStruct, HirStructField, HirStructInitField, HirThrow,
+    HirTryCatch, HirVariableDeclaration, HirWhile, LoopId, ParameterPassMode, PropagateTarget,
+    ResolvedType, RustDependency, SemaError, SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN,
     OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN,
     RESULT_UNWRAP_ERR_BUILTIN,
 };
@@ -28,12 +31,10 @@ fn lower_impls(mut ast: ProgramAst) -> Result<ProgramAst, Vec<SemaError>> {
     let names = ast
         .declarations
         .iter()
-        .filter_map(|d| {
-            if let Declaration::Interface(i) = d {
-                Some(i.name.name.clone())
-            } else {
-                None
-            }
+        .filter_map(|d| match d {
+            Declaration::Interface(i) => Some(i.name.name.clone()),
+            Declaration::ImportInterface(i) => Some(i.name.name.clone()),
+            _ => None,
         })
         .collect::<HashSet<_>>();
     let mut declarations = Vec::new();
@@ -114,6 +115,7 @@ fn closure_free_names(closure: &lift_ast::ClosureExpression) -> HashSet<String> 
                 expression(&i.index, bound, free);
             }
             ExpressionKind::Grouping(e) => expression(e, bound, free),
+            ExpressionKind::TryPropagate(inner) => expression(inner, bound, free),
             ExpressionKind::Call(c) => {
                 expression(&c.callee, bound, free);
                 for a in &c.arguments {
@@ -154,7 +156,39 @@ fn closure_free_names(closure: &lift_ast::ClosureExpression) -> HashSet<String> 
                     expression(&w.condition, bound, free);
                     block(&w.body, &mut bound.clone(), free);
                 }
+                Statement::Match(m) => {
+                    expression(&m.value, bound, free);
+                    for arm in &m.arms {
+                        let mut arm_bound = bound.clone();
+                        match &arm.pattern.kind {
+                            lift_ast::MatchPatternKind::Some(name)
+                            | lift_ast::MatchPatternKind::Err(name) => {
+                                arm_bound.insert(name.name.clone());
+                            }
+                            lift_ast::MatchPatternKind::Ok(Some(name)) => {
+                                arm_bound.insert(name.name.clone());
+                            }
+                            lift_ast::MatchPatternKind::None
+                            | lift_ast::MatchPatternKind::Ok(None) => {}
+                        }
+                        block(&arm.body, &mut arm_bound, free);
+                    }
+                }
+                Statement::ForOf(f) => {
+                    expression(&f.iterable, bound, free);
+                    let mut for_bound = bound.clone();
+                    for_bound.insert(f.name.name.clone());
+                    block(&f.body, &mut for_bound, free);
+                }
+                Statement::Break(_) | Statement::Continue(_) => {}
                 Statement::If(i) => conditional(i, bound, free),
+                Statement::Throw(t) => expression(&t.value, bound, free),
+                Statement::TryCatch(t) => {
+                    block(&t.body, &mut bound.clone(), free);
+                    let mut catch_bound = bound.clone();
+                    catch_bound.insert(t.catch_name.name.clone());
+                    block(&t.catch_body, &mut catch_bound, free);
+                }
             }
         }
     }
@@ -172,6 +206,9 @@ fn closure_free_names(closure: &lift_ast::ClosureExpression) -> HashSet<String> 
 struct StructInfo {
     fields: Vec<HirStructField>,
     span: Span,
+    /// Tipo Rust externo: não gera `struct` e não participa do ciclo de tamanho.
+    /// PT-BR: tipo externo; sem geração e sem aresta no grafo de tamanho.
+    external: bool,
 }
 
 #[derive(Clone)]
@@ -199,6 +236,29 @@ struct BindingInfo {
     binding: Option<BindingKind>,
     parameter_mode: Option<ParameterPassMode>,
     parameter_mutated: bool,
+    /// Binding derivado de narrowing: cópia somente leitura do payload.
+    /// PT-BR: binding derivado de narrowing; cópia somente leitura.
+    narrowed: bool,
+    span: Span,
+}
+
+impl BindingInfo {
+    /// Somente bindings imutáveis podem ser estreitados: `const` e parâmetros.
+    /// PT-BR: narrowing exige binding imutável (`const` ou parâmetro).
+    fn is_narrowable(&self) -> bool {
+        !self.narrowed
+            && (self.binding == Some(BindingKind::Const)
+                || (self.binding.is_none() && self.parameter_mode.is_some()))
+    }
+}
+
+/// Fato de fluxo `x: T` derivado de um teste sobre `x: T?`.
+/// PT-BR: fato de fluxo que estreita `T?` para `T`.
+#[derive(Clone)]
+struct NarrowFact {
+    source: BindingId,
+    name: String,
+    payload: ResolvedType,
     span: Span,
 }
 
@@ -207,10 +267,14 @@ struct Analyzer<'ast> {
     structures: HashMap<String, StructInfo>,
     functions: HashMap<String, FunctionInfo>,
     struct_by_declaration: HashMap<usize, HirStruct>,
+    extern_by_declaration: HashMap<usize, HirExternStruct>,
+    extern_dependencies: HashMap<String, (RustDependency, Span)>,
     function_by_declaration: HashMap<usize, FunctionInfo>,
     import_by_declaration: HashMap<usize, HirImport>,
     errors: Vec<SemaError>,
     next_binding_id: u32,
+    next_try_id: u32,
+    next_loop_id: u32,
     mutable_bindings: HashSet<BindingId>,
 }
 
@@ -257,10 +321,14 @@ impl<'ast> Analyzer<'ast> {
             structures: HashMap::new(),
             functions: HashMap::new(),
             struct_by_declaration: HashMap::new(),
+            extern_by_declaration: HashMap::new(),
+            extern_dependencies: HashMap::new(),
             function_by_declaration: HashMap::new(),
             import_by_declaration: HashMap::new(),
             errors: Vec::new(),
             next_binding_id: 0,
+            next_try_id: 0,
+            next_loop_id: 0,
             mutable_bindings: HashSet::new(),
         }
     }
@@ -302,6 +370,8 @@ impl<'ast> Analyzer<'ast> {
                 &self.structures,
                 &self.functions,
                 &mut self.next_binding_id,
+                &mut self.next_try_id,
+                &mut self.next_loop_id,
                 &mut self.mutable_bindings,
                 None,
             );
@@ -334,6 +404,11 @@ impl<'ast> Analyzer<'ast> {
                 Declaration::Interface(_) => {
                     if let Some(item) = self.struct_by_declaration.get(&index) {
                         declarations.push(HirDeclaration::Struct(item.clone()));
+                    }
+                }
+                Declaration::ImportInterface(_) => {
+                    if let Some(item) = self.extern_by_declaration.get(&index) {
+                        declarations.push(HirDeclaration::ExternStruct(item.clone()));
                     }
                 }
                 Declaration::Function(_) => {
@@ -386,12 +461,14 @@ impl<'ast> Analyzer<'ast> {
     fn collect_struct_names(&mut self) {
         let mut declared = HashMap::<String, Span>::new();
         for declaration in &self.ast.declarations {
-            let Declaration::Interface(interface) = declaration else {
-                continue;
+            let name = match declaration {
+                Declaration::Interface(interface) => &interface.name,
+                Declaration::ImportInterface(interface) => &interface.name,
+                _ => continue,
             };
-            let name = interface.name.name.clone();
+            let name_text = name.name.clone();
             if matches!(
-                name.as_str(),
+                name_text.as_str(),
                 "SqliteConnection"
                     | "SqliteTransaction"
                     | "DbValue"
@@ -402,15 +479,15 @@ impl<'ast> Analyzer<'ast> {
                 self.errors.push(SemaError::new(
                     SemaErrorKind::DuplicateDeclaration,
                     "nome reservado para recurso opaco SQLite",
-                    interface.name.span,
+                    name.span,
                 ));
             }
-            if let Some(previous) = declared.insert(name.clone(), interface.name.span) {
+            if let Some(previous) = declared.insert(name_text.clone(), name.span) {
                 self.errors.push(
                     SemaError::new(
                         SemaErrorKind::DuplicateDeclaration,
-                        format!("declaração duplicada de `{name}`"),
-                        interface.name.span,
+                        format!("declaração duplicada de `{name_text}`"),
+                        name.span,
                     )
                     .with_secondary(previous),
                 );
@@ -421,61 +498,184 @@ impl<'ast> Analyzer<'ast> {
 
     fn resolve_structs(&mut self) {
         let mut names = HashSet::new();
+        let mut extern_names = HashSet::new();
         for declaration in &self.ast.declarations {
-            if let Declaration::Interface(interface) = declaration {
-                names.insert(interface.name.name.clone());
+            match declaration {
+                Declaration::Interface(interface) => {
+                    names.insert(interface.name.name.clone());
+                }
+                Declaration::ImportInterface(interface) => {
+                    names.insert(interface.name.name.clone());
+                    extern_names.insert(interface.name.name.clone());
+                }
+                _ => {}
             }
         }
 
         for (index, declaration) in self.ast.declarations.iter().enumerate() {
-            let Declaration::Interface(interface) = declaration else {
-                continue;
-            };
-            let mut fields = Vec::new();
-            let mut field_names = HashMap::<String, Span>::new();
-            let mut valid = true;
-            for field in &interface.fields {
-                if let Some(previous) = field_names.insert(field.name.name.clone(), field.name.span)
-                {
-                    self.errors.push(
-                        SemaError::new(
-                            SemaErrorKind::DuplicateField,
-                            format!("campo duplicado `{}`", field.name.name),
-                            field.name.span,
-                        )
-                        .with_secondary(previous),
-                    );
-                    valid = false;
-                    continue;
-                }
-                match resolve_type(&field.ty, &names, TypePosition::Field) {
-                    Ok(ty) => fields.push(HirStructField {
-                        name: field.name.name.clone(),
-                        ty,
-                        span: field.span,
-                    }),
-                    Err(error) => {
-                        self.errors.push(error);
-                        valid = false;
-                    }
-                }
-            }
-            if valid {
-                let info = StructInfo {
-                    fields: fields.clone(),
-                    span: interface.span,
-                };
-                self.structures.insert(interface.name.name.clone(), info);
-                self.struct_by_declaration.insert(
-                    index,
-                    HirStruct {
-                        name: interface.name.name.clone(),
-                        fields,
+            match declaration {
+                Declaration::Interface(interface) => {
+                    let Some(fields) =
+                        self.resolve_struct_fields(&interface.fields, &names, &extern_names, false)
+                    else {
+                        continue;
+                    };
+                    let info = StructInfo {
+                        fields: fields.clone(),
                         span: interface.span,
-                    },
-                );
+                        external: false,
+                    };
+                    self.structures.insert(interface.name.name.clone(), info);
+                    self.struct_by_declaration.insert(
+                        index,
+                        HirStruct {
+                            name: interface.name.name.clone(),
+                            fields,
+                            span: interface.span,
+                        },
+                    );
+                }
+                Declaration::ImportInterface(interface) => {
+                    self.resolve_import_interface(index, interface, &names, &extern_names);
+                }
+                _ => {}
             }
         }
+    }
+
+    /// Campos de interface validados para o tipo local ou para o layout externo.
+    /// PT-BR: campos validados para struct local ou layout externo.
+    fn resolve_struct_fields(
+        &mut self,
+        source: &[lift_ast::InterfaceField],
+        names: &HashSet<String>,
+        extern_names: &HashSet<String>,
+        external: bool,
+    ) -> Option<Vec<HirStructField>> {
+        let mut fields = Vec::new();
+        let mut field_names = HashMap::<String, Span>::new();
+        let mut valid = true;
+        for field in source {
+            if let Some(previous) = field_names.insert(field.name.name.clone(), field.name.span) {
+                self.errors.push(
+                    SemaError::new(
+                        SemaErrorKind::DuplicateField,
+                        format!("campo duplicado `{}`", field.name.name),
+                        field.name.span,
+                    )
+                    .with_secondary(previous),
+                );
+                valid = false;
+                continue;
+            }
+            if external && !crate::interop::rust_identifier(&field.name.name) {
+                self.errors.push(SemaError::new(
+                    SemaErrorKind::InvalidImport,
+                    format!(
+                        "campo externo `{}` precisa ser um identificador Rust sem palavra reservada",
+                        field.name.name
+                    ),
+                    field.name.span,
+                ));
+                valid = false;
+                continue;
+            }
+            match resolve_type(&field.ty, names, TypePosition::Field) {
+                Ok(ty) => {
+                    if external {
+                        if let Err(error) =
+                            crate::interop::validate_field_type(&ty, field.ty.span, extern_names)
+                        {
+                            self.errors.push(error);
+                            valid = false;
+                            continue;
+                        }
+                    }
+                    let ty = if field.optional {
+                        // `field?: T` é o mesmo tipo Rust de `field: T?`, mas
+                        // pode ser omitido no object literal. Um aninhamento
+                        // direto (`field?: T?`) continua rejeitado.
+                        if matches!(ty, ResolvedType::Optional(_)) || !ty.is_value_type() {
+                            self.errors.push(SemaError::new(
+                                SemaErrorKind::UnsupportedType,
+                                "campo opcional `?` exige um tipo T não opcional e não void",
+                                field.ty.span,
+                            ));
+                            valid = false;
+                            continue;
+                        }
+                        ResolvedType::Optional(Box::new(ty))
+                    } else {
+                        ty
+                    };
+                    fields.push(HirStructField {
+                        name: field.name.name.clone(),
+                        ty,
+                        optional: field.optional,
+                        span: field.span,
+                    });
+                }
+                Err(error) => {
+                    self.errors.push(error);
+                    valid = false;
+                }
+            }
+        }
+        valid.then_some(fields)
+    }
+
+    fn resolve_import_interface(
+        &mut self,
+        index: usize,
+        interface: &ImportInterfaceDeclaration,
+        names: &HashSet<String>,
+        extern_names: &HashSet<String>,
+    ) {
+        let (dependency, rust_path) =
+            match crate::interop::resolve_source(&interface.source, interface.source_span) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    self.errors.push(error);
+                    return;
+                }
+            };
+        let crate_name = rust_path.split("::").next().unwrap_or_default().to_owned();
+        if let Some((previous, previous_span)) = self.extern_dependencies.get(&crate_name) {
+            if previous != &dependency {
+                self.errors.push(
+                    SemaError::new(
+                        SemaErrorKind::InvalidImport,
+                        format!("dependências incompatíveis para a crate `{crate_name}`"),
+                        interface.source_span,
+                    )
+                    .with_secondary(*previous_span),
+                );
+                return;
+            }
+        } else {
+            self.extern_dependencies
+                .insert(crate_name, (dependency.clone(), interface.source_span));
+        }
+        let Some(fields) = self.resolve_struct_fields(&interface.fields, names, extern_names, true)
+        else {
+            return;
+        };
+        let info = StructInfo {
+            fields: fields.clone(),
+            span: interface.span,
+            external: true,
+        };
+        self.structures.insert(interface.name.name.clone(), info);
+        self.extern_by_declaration.insert(
+            index,
+            HirExternStruct {
+                name: interface.name.name.clone(),
+                fields,
+                dependency,
+                rust_path,
+                span: interface.span,
+            },
+        );
     }
 
     fn collect_functions(&mut self) {
@@ -484,6 +684,10 @@ impl<'ast> Analyzer<'ast> {
             match declaration {
                 Declaration::Interface(lift_ast::InterfaceDeclaration {
                     name: identifier, ..
+                })
+                | Declaration::ImportInterface(ImportInterfaceDeclaration {
+                    name: identifier,
+                    ..
                 })
                 | Declaration::Function(FunctionDeclaration {
                     name: identifier, ..
@@ -605,7 +809,13 @@ impl<'ast> Analyzer<'ast> {
 
     fn collect_imports(&mut self) {
         let names = self.structures.keys().cloned().collect::<HashSet<_>>();
-        let mut dependencies = HashMap::<String, (RustDependency, Span)>::new();
+        let extern_names = self
+            .structures
+            .iter()
+            .filter(|(_, info)| info.external)
+            .map(|(name, _)| name.clone())
+            .collect::<HashSet<_>>();
+        let mut dependencies = self.extern_dependencies.clone();
         for (index, declaration) in self.ast.declarations.iter().enumerate() {
             let Declaration::Import(import) = declaration else {
                 continue;
@@ -627,9 +837,18 @@ impl<'ast> Analyzer<'ast> {
                     }
                     let ty = resolve_type(&parameter.ty, &names, TypePosition::Parameter)?;
                     if resource_signature.is_none() {
-                        crate::interop::validate_type(&ty, false, parameter.ty.span)?;
+                        crate::interop::validate_type(
+                            &ty,
+                            false,
+                            parameter.ty.span,
+                            &extern_names,
+                        )?;
                     }
-                    let pass_mode = if ty.is_copy() {
+                    let pass_mode = if ty.contains_closure() {
+                        // Callback FFI: `Rc<dyn Fn>` por valor; o wrapper empresta
+                        // `&dyn Fn` ao ponteiro Rust declarado.
+                        ParameterPassMode::ByValue
+                    } else if ty.is_copy() {
                         ParameterPassMode::ByValue
                     } else {
                         ParameterPassMode::BorrowImm
@@ -661,7 +880,12 @@ impl<'ast> Analyzer<'ast> {
                         parameter.mutated = *mode == ParameterPassMode::BorrowMut;
                     }
                 } else {
-                    crate::interop::validate_type(&return_type, true, import.return_type.span)?;
+                    crate::interop::validate_type(
+                        &return_type,
+                        true,
+                        import.return_type.span,
+                        &extern_names,
+                    )?;
                 }
                 let crate_name = rust_path
                     .split("::")
@@ -725,6 +949,12 @@ impl<'ast> Analyzer<'ast> {
                 continue;
             };
             for parameter in &mut signature.parameters {
+                if parameter.ty.contains_closure() {
+                    // Callbacks são `Rc<dyn Fn>`: passados por valor com clone barato.
+                    parameter.pass_mode = ParameterPassMode::ByValue;
+                    parameter.mutated = false;
+                    continue;
+                }
                 if parameter.ty.is_copy() {
                     parameter.pass_mode = ParameterPassMode::ByValue;
                     continue;
@@ -809,6 +1039,8 @@ impl<'ast> Analyzer<'ast> {
             &self.structures,
             &self.functions,
             &mut self.next_binding_id,
+            &mut self.next_try_id,
+            &mut self.next_loop_id,
             &mut self.mutable_bindings,
             Some(FunctionContext {
                 return_type: signature.return_type.clone(),
@@ -827,6 +1059,7 @@ impl<'ast> Analyzer<'ast> {
                     binding: None,
                     parameter_mode: Some(parameter.pass_mode),
                     parameter_mutated: parameter.mutated,
+                    narrowed: false,
                     span: parameter.span,
                 },
             )?;
@@ -843,7 +1076,7 @@ impl<'ast> Analyzer<'ast> {
 
         let body = checker.check_block(&declaration.body, true)?;
         if signature.return_type != ResolvedType::Void
-            && !block_guarantees_return(&declaration.body)
+            && !block_guarantees_return(&declaration.body, 0)
         {
             return Err(SemaError::new(
                 SemaErrorKind::MissingReturnPath,
@@ -871,13 +1104,24 @@ struct FunctionContext {
     has_explicit_return_type: bool,
 }
 
+/// Contexto de um bloco `try` ativo durante a análise do corpo.
+#[derive(Clone)]
+struct TryContext {
+    id: TryId,
+    error: ResolvedType,
+}
+
 struct BodyChecker<'a> {
     structures: &'a HashMap<String, StructInfo>,
     functions: &'a HashMap<String, FunctionInfo>,
     next_binding_id: &'a mut u32,
+    next_try_id: &'a mut u32,
     mutable_bindings: &'a mut HashSet<BindingId>,
     scopes: Vec<HashMap<String, BindingInfo>>,
     function: Option<FunctionContext>,
+    try_stack: Vec<TryContext>,
+    next_loop_id: &'a mut u32,
+    loop_stack: Vec<LoopId>,
 }
 
 impl<'a> BodyChecker<'a> {
@@ -885,6 +1129,8 @@ impl<'a> BodyChecker<'a> {
         structures: &'a HashMap<String, StructInfo>,
         functions: &'a HashMap<String, FunctionInfo>,
         next_binding_id: &'a mut u32,
+        next_try_id: &'a mut u32,
+        next_loop_id: &'a mut u32,
         mutable_bindings: &'a mut HashSet<BindingId>,
         function: Option<FunctionContext>,
     ) -> Self {
@@ -892,15 +1138,31 @@ impl<'a> BodyChecker<'a> {
             structures,
             functions,
             next_binding_id,
+            next_try_id,
             mutable_bindings,
             scopes: vec![HashMap::new()],
             function,
+            try_stack: Vec::new(),
+            next_loop_id,
+            loop_stack: Vec::new(),
         }
     }
 
     fn fresh_binding_id(&mut self) -> BindingId {
         let id = BindingId(*self.next_binding_id);
         *self.next_binding_id = self.next_binding_id.saturating_add(1);
+        id
+    }
+
+    fn fresh_try_id(&mut self) -> TryId {
+        let id = TryId(*self.next_try_id);
+        *self.next_try_id = self.next_try_id.saturating_add(1);
+        id
+    }
+
+    fn fresh_loop_id(&mut self) -> LoopId {
+        let id = LoopId(*self.next_loop_id);
+        *self.next_loop_id = self.next_loop_id.saturating_add(1);
         id
     }
 
@@ -935,12 +1197,7 @@ impl<'a> BodyChecker<'a> {
         if create_scope {
             self.scopes.push(HashMap::new());
         }
-        let function = self.function.clone();
-        let statements = block
-            .statements
-            .iter()
-            .map(|statement| self.check_statement(statement, function.as_ref()))
-            .collect::<Result<Vec<_>, _>>();
+        let statements = self.check_block_statements(&block.statements);
         if create_scope {
             self.scopes.pop();
         }
@@ -948,6 +1205,240 @@ impl<'a> BodyChecker<'a> {
             statements: statements?,
             span: block.span,
         })
+    }
+
+    /// Bloco com fatos de fluxo aplicados antes dos statements da fonte.
+    /// PT-BR: bloco com bindings derivados de narrowing antes dos statements.
+    fn check_block_narrowed(
+        &mut self,
+        block: &Block,
+        create_scope: bool,
+        facts: &[NarrowFact],
+    ) -> Result<HirBlock, SemaError> {
+        if create_scope {
+            self.scopes.push(HashMap::new());
+        }
+        let statements = (|| {
+            let mut statements = self.push_narrowed(facts);
+            statements.extend(self.check_block_statements(&block.statements)?);
+            Ok(statements)
+        })();
+        if create_scope {
+            self.scopes.pop();
+        }
+        Ok(HirBlock {
+            statements: statements?,
+            span: block.span,
+        })
+    }
+
+    fn check_block_statements(
+        &mut self,
+        source: &[Statement],
+    ) -> Result<Vec<HirStatement>, SemaError> {
+        let function = self.function.clone();
+        let mut statements = Vec::with_capacity(source.len());
+        for (index, statement) in source.iter().enumerate() {
+            statements.push(self.check_statement(statement, function.as_ref())?);
+            let Statement::If(conditional) = statement else {
+                continue;
+            };
+            // Um `if` que retorna em um dos braços estreita o tipo no restante
+            // do bloco, como em `if x == null { return; }`. O clone só é emitido
+            // quando o nome ainda aparece nos statements seguintes.
+            let facts = self
+                .if_fallthrough_facts(conditional)
+                .into_iter()
+                .filter(|fact| {
+                    source[index + 1..]
+                        .iter()
+                        .any(|statement| statement_mentions_name(statement, &fact.name))
+                })
+                .collect::<Vec<_>>();
+            statements.extend(self.push_narrowed(&facts));
+        }
+        Ok(statements)
+    }
+
+    /// Declara bindings derivados somente leitura para os fatos recebidos.
+    /// PT-BR: cria os bindings derivados de narrowing no escopo atual.
+    fn push_narrowed(&mut self, facts: &[NarrowFact]) -> Vec<HirStatement> {
+        let mut statements = Vec::with_capacity(facts.len());
+        let mut seen = HashSet::new();
+        for fact in facts {
+            if !seen.insert(fact.source) {
+                continue;
+            }
+            // Fatos só valem enquanto o nome ainda resolve para o mesmo binding
+            // imutável; bindings de blocos internos já saíram de escopo.
+            if !self
+                .lookup(&fact.name)
+                .is_some_and(|binding| binding.id == fact.source && binding.is_narrowable())
+            {
+                continue;
+            }
+            let id = self.fresh_binding_id();
+            if let Some(scope) = self.scopes.last_mut() {
+                scope.insert(
+                    fact.name.clone(),
+                    BindingInfo {
+                        id,
+                        ty: fact.payload.clone(),
+                        binding: Some(BindingKind::Const),
+                        parameter_mode: None,
+                        parameter_mutated: false,
+                        narrowed: true,
+                        span: fact.span,
+                    },
+                );
+            }
+            statements.push(HirStatement::Narrow(HirNarrowing {
+                id,
+                source: fact.source,
+                ty: fact.payload.clone(),
+                span: fact.span,
+            }));
+        }
+        statements
+    }
+
+    /// Fatos de fluxo inferidos de uma condição de teste.
+    /// PT-BR: fatos verdadeiros/falsos inferidos da condição.
+    fn condition_facts(&self, condition: &Expression) -> (Vec<NarrowFact>, Vec<NarrowFact>) {
+        match &condition.kind {
+            ExpressionKind::Grouping(inner) => self.condition_facts(inner),
+            ExpressionKind::Unary(unary) if unary.operator == UnaryOperator::Not => {
+                let (truthy, falsy) = self.condition_facts(&unary.operand);
+                (falsy, truthy)
+            }
+            ExpressionKind::Binary(binary) if binary.operator == BinaryOperator::And => {
+                let (mut truthy, _) = self.condition_facts(&binary.left);
+                let (right, _) = self.condition_facts(&binary.right);
+                truthy.extend(right);
+                (truthy, Vec::new())
+            }
+            ExpressionKind::Binary(binary) if binary.operator == BinaryOperator::Or => {
+                let (_, mut falsy) = self.condition_facts(&binary.left);
+                let (_, right) = self.condition_facts(&binary.right);
+                falsy.extend(right);
+                (Vec::new(), falsy)
+            }
+            ExpressionKind::Binary(binary)
+                if matches!(
+                    binary.operator,
+                    BinaryOperator::Equal | BinaryOperator::NotEqual
+                ) =>
+            {
+                let (tested, positive) = if is_null_expression(&binary.left) {
+                    (&binary.right, binary.operator == BinaryOperator::NotEqual)
+                } else if is_null_expression(&binary.right) {
+                    (&binary.left, binary.operator == BinaryOperator::NotEqual)
+                } else {
+                    return (Vec::new(), Vec::new());
+                };
+                let Some(fact) = self.narrowable_fact(tested) else {
+                    return (Vec::new(), Vec::new());
+                };
+                if positive {
+                    (vec![fact], Vec::new())
+                } else {
+                    (Vec::new(), vec![fact])
+                }
+            }
+            ExpressionKind::Call(call) => {
+                if self.option_operation(call) == Some("is_some") && call.arguments.len() == 1 {
+                    return match self.narrowable_fact(&call.arguments[0]) {
+                        Some(fact) => (vec![fact], Vec::new()),
+                        None => (Vec::new(), Vec::new()),
+                    };
+                }
+                (Vec::new(), Vec::new())
+            }
+            _ => (Vec::new(), Vec::new()),
+        }
+    }
+
+    fn narrowable_fact(&self, expression: &Expression) -> Option<NarrowFact> {
+        let mut expression = expression;
+        while let ExpressionKind::Grouping(inner) = &expression.kind {
+            expression = inner;
+        }
+        let ExpressionKind::Identifier(identifier) = &expression.kind else {
+            return None;
+        };
+        let binding = self.lookup(&identifier.name)?;
+        if !binding.is_narrowable() {
+            return None;
+        }
+        let ResolvedType::Optional(payload) = &binding.ty else {
+            return None;
+        };
+        Some(NarrowFact {
+            source: binding.id,
+            name: identifier.name.clone(),
+            payload: (**payload).clone(),
+            span: expression.span,
+        })
+    }
+
+    /// Fatos de fluxo válidos na continuação de um `if`, considerando braços
+    /// que retornam e cadeias `else if`. Um fato só permanece quando vale em
+    /// todos os caminhos que alcançam a continuação.
+    /// PT-BR: fatos válidos após o `if` para todos os caminhos de continuação.
+    fn if_fallthrough_facts(&self, statement: &lift_ast::IfStatement) -> Vec<NarrowFact> {
+        let (truthy, falsy) = self.condition_facts(&statement.condition);
+        let then_exits = block_guarantees_exit(&statement.then_branch);
+        let else_exits = statement
+            .else_branch
+            .as_ref()
+            .is_some_and(|branch| match &branch.kind {
+                ElseBranchKind::Block(block) => block_guarantees_exit(block),
+                ElseBranchKind::ElseIf(nested) => if_guarantees_exit(nested),
+            });
+        if then_exits && else_exits {
+            // Continuação inalcançável: não há caminho para carregar fatos.
+            return Vec::new();
+        }
+        let mut else_facts = falsy;
+        match statement.else_branch.as_ref() {
+            None => {}
+            Some(branch) => match &branch.kind {
+                ElseBranchKind::Block(block) => {
+                    else_facts.extend(self.block_fallthrough_facts(block));
+                }
+                ElseBranchKind::ElseIf(nested) => {
+                    else_facts.extend(self.if_fallthrough_facts(nested));
+                }
+            },
+        }
+        if then_exits {
+            return dedupe_facts(else_facts);
+        }
+        let mut then_facts = truthy;
+        then_facts.extend(self.block_fallthrough_facts(&statement.then_branch));
+        if else_exits {
+            return dedupe_facts(then_facts);
+        }
+        intersect_facts(&then_facts, &else_facts)
+    }
+
+    /// Fatos que valem ao final de um bloco por causa de `if` com retorno.
+    /// PT-BR: fatos acumulados por guardas de retorno dentro do bloco.
+    fn block_fallthrough_facts(&self, block: &Block) -> Vec<NarrowFact> {
+        let mut facts = Vec::new();
+        for statement in &block.statements {
+            if let Statement::If(inner) = statement {
+                for fact in self.if_fallthrough_facts(inner) {
+                    if !facts
+                        .iter()
+                        .any(|existing: &NarrowFact| existing.source == fact.source)
+                    {
+                        facts.push(fact);
+                    }
+                }
+            }
+        }
+        facts
     }
 
     fn check_statement(
@@ -976,18 +1467,9 @@ impl<'a> BodyChecker<'a> {
                     Some(ty) => self.check_expr(&variable.initializer, ty)?,
                     None => self.synthesize_expr(&variable.initializer)?,
                 };
-                let is_closure = matches!(initializer.ty, ResolvedType::Closure(..));
-                if is_closure
-                    && (variable.binding != BindingKind::Const
-                        || !matches!(variable.initializer.kind, ExpressionKind::Closure(_)))
+                if !initializer.ty.is_value_type()
+                    && !matches!(initializer.ty, ResolvedType::Closure(..))
                 {
-                    return Err(SemaError::new(
-                        SemaErrorKind::UnsupportedType,
-                        "closures exigem declaração const direta e não podem ser copiadas",
-                        variable.span,
-                    ));
-                }
-                if !initializer.ty.is_value_type() && !is_closure {
                     return Err(SemaError::new(
                         SemaErrorKind::TypeMismatch,
                         "uma variável não pode ter tipo `void`",
@@ -1005,6 +1487,7 @@ impl<'a> BodyChecker<'a> {
                         binding: Some(variable.binding),
                         parameter_mode: None,
                         parameter_mutated: false,
+                        narrowed: false,
                         span: variable.name.span,
                     },
                 )?;
@@ -1019,34 +1502,95 @@ impl<'a> BodyChecker<'a> {
                 }))
             }
             Statement::Assignment(assignment) => self.check_assignment(assignment),
-            Statement::If(statement) => {
+            Statement::If(statement) => Ok(HirStatement::If(self.check_if(statement)?)),
+            Statement::Match(statement) => self.check_match(statement),
+            Statement::While(statement) => {
+                let (truthy, _) = self.condition_facts(&statement.condition);
                 let condition = self.check_expr(&statement.condition, &ResolvedType::Boolean)?;
-                let then_branch = self.check_block(&statement.then_branch, true)?;
-                let else_branch = statement
-                    .else_branch
-                    .as_ref()
-                    .map(|branch| match &branch.kind {
-                        ElseBranchKind::Block(block) => {
-                            self.check_block(block, true).map(HirElseBranch::Block)
-                        }
-                        ElseBranchKind::ElseIf(if_statement) => self
-                            .check_if(if_statement)
-                            .map(|statement| HirElseBranch::ElseIf(Box::new(statement))),
-                    })
-                    .transpose()?;
-                Ok(HirStatement::If(HirIf {
+                let label = self.fresh_loop_id();
+                self.loop_stack.push(label);
+                let body = self.check_block_narrowed(&statement.body, true, &truthy);
+                self.loop_stack.pop();
+                Ok(HirStatement::While(HirWhile {
+                    label,
                     condition,
-                    then_branch,
-                    else_branch,
+                    body: body?,
                     span: statement.span,
                 }))
             }
-            Statement::While(statement) => {
-                let condition = self.check_expr(&statement.condition, &ResolvedType::Boolean)?;
-                let body = self.check_block(&statement.body, true)?;
-                Ok(HirStatement::While(HirWhile {
-                    condition,
-                    body,
+            Statement::ForOf(statement) => {
+                let iterable = self.synthesize_expr(&statement.iterable)?;
+                let ResolvedType::Array(element) = iterable.ty.clone() else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::TypeMismatch,
+                        format!("`for...of` exige um array, recebido `{}`", iterable.ty),
+                        statement.iterable.span,
+                    ));
+                };
+                if element.contains_resource() {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "`for...of` não itera arrays de recursos opacos",
+                        statement.iterable.span,
+                    ));
+                }
+                let iterable = self.materialize_owned(iterable, false);
+                let id = self.fresh_binding_id();
+                let label = self.fresh_loop_id();
+                self.scopes.push(HashMap::new());
+                let checked = (|| {
+                    self.declare(
+                        &statement.name.name,
+                        BindingInfo {
+                            id,
+                            ty: (*element).clone(),
+                            binding: Some(statement.binding),
+                            parameter_mode: None,
+                            parameter_mutated: false,
+                            narrowed: false,
+                            span: statement.name.span,
+                        },
+                    )?;
+                    self.loop_stack.push(label);
+                    let body = self.check_block(&statement.body, true);
+                    self.loop_stack.pop();
+                    body
+                })();
+                self.scopes.pop();
+                Ok(HirStatement::ForOf(HirForOf {
+                    label,
+                    id,
+                    name: statement.name.name.clone(),
+                    binding: statement.binding,
+                    element_ty: *element,
+                    iterable,
+                    body: checked?,
+                    span: statement.span,
+                }))
+            }
+            Statement::Break(statement) => {
+                let Some(target) = self.loop_stack.last().copied() else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidLoopControl,
+                        "`break` só pode aparecer dentro de `while` ou `for`",
+                        statement.span,
+                    ));
+                };
+                Ok(HirStatement::Break(HirBreak {
+                    target,
+                    span: statement.span,
+                }))
+            }
+            Statement::Continue(statement) => {
+                let Some(target) = self.loop_stack.last().copied() else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidLoopControl,
+                        "`continue` só pode aparecer dentro de `while` ou `for`",
+                        statement.span,
+                    ));
+                };
+                Ok(HirStatement::Continue(HirContinue {
+                    target,
                     span: statement.span,
                 }))
             }
@@ -1091,6 +1635,90 @@ impl<'a> BodyChecker<'a> {
                     span: statement.span,
                 }))
             }
+            Statement::Throw(statement) => {
+                let candidates = self.propagation_candidates();
+                if candidates.is_empty() {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidPropagation,
+                        "`throw` exige um `try` com catch compatível ou uma função que retorne `Result<_, E>`",
+                        statement.span,
+                    ));
+                }
+                let mut checked = None;
+                for (target, error) in candidates {
+                    if let Ok(value) = self.check_expr(&statement.value, &error) {
+                        checked = Some((self.materialize_owned(value, false), target));
+                        break;
+                    }
+                }
+                let Some((value, target)) = checked else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidPropagation,
+                        "o valor de `throw` não corresponde ao tipo de erro do `catch` nem ao erro do retorno",
+                        statement.value.span,
+                    ));
+                };
+                Ok(HirStatement::Throw(HirThrow {
+                    value,
+                    target,
+                    span: statement.span,
+                }))
+            }
+            Statement::TryCatch(statement) => {
+                let catch_ty =
+                    self.resolve_local_type(&statement.catch_type, TypePosition::Variable)?;
+                if !catch_ty.is_value_type() {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "`catch` exige um tipo de erro de valor, não `void`",
+                        statement.catch_type.span,
+                    ));
+                }
+                let label = self.fresh_try_id();
+                self.scopes.push(HashMap::new());
+                self.try_stack.push(TryContext {
+                    id: label,
+                    error: catch_ty.clone(),
+                });
+                let body = self.check_block(&statement.body, true);
+                self.try_stack.pop();
+                self.scopes.pop();
+                let body = body?;
+                let catch_id = self.fresh_binding_id();
+                self.scopes.push(HashMap::new());
+                let checked = (|| {
+                    self.declare(
+                        &statement.catch_name.name,
+                        BindingInfo {
+                            id: catch_id,
+                            ty: catch_ty.clone(),
+                            binding: None,
+                            parameter_mode: Some(ParameterPassMode::ByValue),
+                            parameter_mutated: false,
+                            narrowed: false,
+                            span: statement.catch_name.span,
+                        },
+                    )?;
+                    self.check_block(&statement.catch_body, false)
+                })();
+                self.scopes.pop();
+                let catch_body = checked?;
+                let depth = self.try_stack.len();
+                let returns = block_guarantees_return(&statement.body, depth + 1)
+                    || (block_guarantees_exit(&statement.body)
+                        && block_guarantees_return(&statement.catch_body, depth));
+                Ok(HirStatement::TryCatch(HirTryCatch {
+                    label,
+                    body,
+                    catch_id,
+                    catch_name: statement.catch_name.name.clone(),
+                    catch_ty,
+                    catch_body,
+                    catch_mut: self.mutable_bindings.contains(&catch_id),
+                    returns,
+                    span: statement.span,
+                }))
+            }
             Statement::Expression(statement) => {
                 let expression = self.synthesize_expr(&statement.expression)?;
                 let discard_mode = if !expression.ty.is_copy() && is_place(&expression) {
@@ -1108,18 +1736,48 @@ impl<'a> BodyChecker<'a> {
     }
 
     fn check_if(&mut self, statement: &lift_ast::IfStatement) -> Result<HirIf, SemaError> {
+        let (truthy, falsy) = self.condition_facts(&statement.condition);
+        let truthy = truthy
+            .into_iter()
+            .filter(|fact| block_mentions_name(&statement.then_branch, &fact.name))
+            .collect::<Vec<_>>();
+        let falsy = falsy
+            .into_iter()
+            .filter(|fact| match statement.else_branch.as_ref() {
+                Some(branch) => match &branch.kind {
+                    ElseBranchKind::Block(block) => block_mentions_name(block, &fact.name),
+                    ElseBranchKind::ElseIf(nested) => if_mentions_name(nested, &fact.name),
+                },
+                None => false,
+            })
+            .collect::<Vec<_>>();
         let condition = self.check_expr(&statement.condition, &ResolvedType::Boolean)?;
-        let then_branch = self.check_block(&statement.then_branch, true)?;
+        let then_branch = self.check_block_narrowed(&statement.then_branch, true, &truthy)?;
         let else_branch = statement
             .else_branch
             .as_ref()
             .map(|branch| match &branch.kind {
-                ElseBranchKind::Block(block) => {
-                    self.check_block(block, true).map(HirElseBranch::Block)
+                ElseBranchKind::Block(block) => self
+                    .check_block_narrowed(block, true, &falsy)
+                    .map(HirElseBranch::Block),
+                ElseBranchKind::ElseIf(if_statement) => {
+                    if falsy.is_empty() {
+                        self.check_if(if_statement)
+                            .map(|statement| HirElseBranch::ElseIf(Box::new(statement)))
+                    } else {
+                        // Fatos falsos precisam de um bloco para declarar os
+                        // bindings derivados antes do `else if`.
+                        let span = if_statement.span;
+                        self.scopes.push(HashMap::new());
+                        let block = (|| {
+                            let mut statements = self.push_narrowed(&falsy);
+                            statements.push(HirStatement::If(self.check_if(if_statement)?));
+                            Ok(HirBlock { statements, span })
+                        })();
+                        self.scopes.pop();
+                        block.map(HirElseBranch::Block)
+                    }
                 }
-                ElseBranchKind::ElseIf(if_statement) => self
-                    .check_if(if_statement)
-                    .map(|statement| HirElseBranch::ElseIf(Box::new(statement))),
             })
             .transpose()?;
         Ok(HirIf {
@@ -1137,6 +1795,13 @@ impl<'a> BodyChecker<'a> {
         let (target, expected, root) = self.check_place(&assignment.target)?;
         if let Some(root) = root {
             let root_info = self.lookup_by_id(root).cloned();
+            if root_info.as_ref().is_some_and(|binding| binding.narrowed) {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnsupportedOwnershipPattern,
+                    "valor estreitado é uma cópia somente leitura; atribua ao opcional original ou use `option.unwrap`",
+                    assignment.target.span,
+                ));
+            }
             match root_info.as_ref() {
                 Some(binding)
                     if binding.parameter_mode.is_some() && is_bare_place(&assignment.target) =>
@@ -1342,6 +2007,9 @@ impl<'a> BodyChecker<'a> {
                     return self.check_some(expression.span, call, Some(payload));
                 }
             }
+            if let Some(operation) = self.result_constructor(call) {
+                return self.check_result_constructor(expression.span, operation, call, expected);
+            }
         }
         if let ExpressionKind::Binary(binary) = &expression.kind {
             if binary.operator == BinaryOperator::Coalesce {
@@ -1378,6 +2046,32 @@ impl<'a> BodyChecker<'a> {
     fn synthesize_expr(&mut self, expression: &Expression) -> Result<HirExpr, SemaError> {
         match &expression.kind {
             ExpressionKind::Closure(closure) => self.check_closure(closure, expression.span),
+            ExpressionKind::TryPropagate(inner) => {
+                let value = self.synthesize_expr(inner)?;
+                let ResolvedType::Result(ok, error) = value.ty.clone() else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "`?` exige um valor `Result<T, E>`",
+                        expression.span,
+                    ));
+                };
+                let Some(target) = self.propagation_target(&error) else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidPropagation,
+                        "`?` exige um `try` com catch do mesmo erro ou uma função retornando `Result<_, E>` com esse erro",
+                        expression.span,
+                    ));
+                };
+                let value = self.materialize_owned(value, false);
+                Ok(self.expr(
+                    HirExprKind::TryPropagate {
+                        expression: Box::new(value),
+                        target,
+                    },
+                    *ok,
+                    expression.span,
+                ))
+            }
             ExpressionKind::Template(parts) => {
                 let mut result = self.expr(HirExprKind::StringLiteral(String::new()), ResolvedType::String, expression.span);
                 for part in parts {
@@ -1422,28 +2116,23 @@ impl<'a> BodyChecker<'a> {
                 expression.span,
             )),
             ExpressionKind::Identifier(identifier) => {
-                let binding = self.lookup(&identifier.name).cloned().ok_or_else(|| {
-                    if self.functions.contains_key(&identifier.name) {
-                        SemaError::new(
-                            SemaErrorKind::UnsupportedExpression,
-                            "funções não podem ser usadas como valores nesta fase",
-                            identifier.span,
-                        )
-                    } else {
-                        SemaError::new(
-                            SemaErrorKind::UnknownVariable,
-                            format!("variável `{}` não foi declarada", identifier.name),
-                            identifier.span,
-                        )
-                    }
-                })?;
-                Ok(self.expr(
-                    HirExprKind::Local {
-                        id: binding.id,
-                        name: identifier.name.clone(),
-                    },
-                    binding.ty,
-                    expression.span,
+                if let Some(binding) = self.lookup(&identifier.name).cloned() {
+                    return Ok(self.expr(
+                        HirExprKind::Local {
+                            id: binding.id,
+                            name: identifier.name.clone(),
+                        },
+                        binding.ty,
+                        expression.span,
+                    ));
+                }
+                if let Some(function) = self.functions.get(&identifier.name).cloned() {
+                    return self.function_value(identifier.name.clone(), &function, expression.span);
+                }
+                Err(SemaError::new(
+                    SemaErrorKind::UnknownVariable,
+                    format!("variável `{}` não foi declarada", identifier.name),
+                    identifier.span,
                 ))
             }
             ExpressionKind::ObjectLiteral(_) => Err(SemaError::new(
@@ -1628,7 +2317,7 @@ impl<'a> BodyChecker<'a> {
             }
         }
         for declared in &structure.fields {
-            if !provided.contains_key(&declared.name) {
+            if !provided.contains_key(&declared.name) && !declared.optional {
                 return Err(SemaError::new(
                     SemaErrorKind::MissingObjectField,
                     format!(
@@ -1641,8 +2330,10 @@ impl<'a> BodyChecker<'a> {
         }
 
         // HIR preserva a ordem da fonte para que chamadas/efeitos em valores
-        // de campos não sejam reordenados durante a construção.
-        let mut fields = Vec::with_capacity(object.fields.len());
+        // de campos não sejam reordenados durante a construção. Campos
+        // opcionais omitidos entram ao final como `None` explícito, porque o
+        // Rust gerado exige todos os campos na inicialização.
+        let mut fields = Vec::with_capacity(structure.fields.len());
         for field in &object.fields {
             let declared = structure
                 .fields
@@ -1660,6 +2351,16 @@ impl<'a> BodyChecker<'a> {
                 name: declared.name.clone(),
                 value: self.materialize_owned(value, false),
                 span: field.span,
+            });
+        }
+        for declared in &structure.fields {
+            if provided.contains_key(&declared.name) {
+                continue;
+            }
+            fields.push(HirStructInitField {
+                name: declared.name.clone(),
+                value: self.expr(HirExprKind::OptionNone, declared.ty.clone(), declared.span),
+                span: declared.span,
             });
         }
         Ok(self.expr(
@@ -1688,7 +2389,7 @@ impl<'a> BodyChecker<'a> {
         if !first.ty.is_value_type() {
             return Err(SemaError::new(
                 SemaErrorKind::TypeMismatch,
-                "elemento de array não pode ter tipo `void`",
+                "elemento de array exige tipo de valor (não `void` nem função)",
                 array.elements[0].span,
             ));
         }
@@ -1751,6 +2452,320 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
+    /// `match` exaustivo de `Option<T>`/`Result<T, E>`.
+    fn check_match(
+        &mut self,
+        statement: &lift_ast::MatchStatement,
+    ) -> Result<HirStatement, SemaError> {
+        let value = self.synthesize_expr(&statement.value)?;
+        if value.ty.contains_resource() {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "`match` não aceita recurso opaco; use `?` ou unwrap",
+                statement.value.span,
+            ));
+        }
+        let (payload, error) = match value.ty.clone() {
+            ResolvedType::Optional(payload) => ((*payload).clone(), None),
+            ResolvedType::Result(ok, error) => ((*ok).clone(), Some((*error).clone())),
+            other => {
+                return Err(SemaError::new(
+                    SemaErrorKind::TypeMismatch,
+                    format!("`match` exige `Option<T>` ou `Result<T, E>`, recebido `{other}`"),
+                    statement.value.span,
+                ));
+            }
+        };
+        let value = self.materialize_owned(value, false);
+        let mut seen = HashSet::new();
+        let mut arms = Vec::new();
+        for arm in &statement.arms {
+            let (variant, binding) = match (&arm.pattern.kind, &error) {
+                (lift_ast::MatchPatternKind::Some(name), None) => {
+                    ("some", Some((name, payload.clone())))
+                }
+                (lift_ast::MatchPatternKind::None, None) => ("none", None),
+                (lift_ast::MatchPatternKind::Ok(Some(name)), Some(_)) => {
+                    if payload == ResolvedType::Void {
+                        return Err(SemaError::new(
+                            SemaErrorKind::InvalidMatch,
+                            "`ok(nome)` não vale para sucesso `void`; use `ok()`",
+                            arm.pattern.span,
+                        ));
+                    }
+                    ("ok", Some((name, payload.clone())))
+                }
+                (lift_ast::MatchPatternKind::Ok(None), Some(_)) => {
+                    if payload != ResolvedType::Void {
+                        return Err(SemaError::new(
+                            SemaErrorKind::InvalidMatch,
+                            format!("`ok()` exige sucesso `void`, mas o payload é `{payload}`"),
+                            arm.pattern.span,
+                        ));
+                    }
+                    ("ok", None)
+                }
+                (lift_ast::MatchPatternKind::Err(name), Some(_)) => {
+                    ("err", Some((name, error.clone().unwrap())))
+                }
+                _ => {
+                    return Err(SemaError::new(
+                        SemaErrorKind::InvalidMatch,
+                        format!(
+                            "padrão incompatível com o valor do `match` (`{}`)",
+                            value.ty
+                        ),
+                        arm.pattern.span,
+                    ));
+                }
+            };
+            if !seen.insert(variant) {
+                return Err(SemaError::new(
+                    SemaErrorKind::InvalidMatch,
+                    format!("braço `{variant}` duplicado no `match`"),
+                    arm.pattern.span,
+                ));
+            }
+            self.scopes.push(HashMap::new());
+            let checked = (|| {
+                let binding = match binding {
+                    Some((name, ty)) => {
+                        let id = self.fresh_binding_id();
+                        self.declare(
+                            &name.name,
+                            BindingInfo {
+                                id,
+                                ty: ty.clone(),
+                                binding: Some(BindingKind::Const),
+                                parameter_mode: None,
+                                parameter_mutated: false,
+                                narrowed: false,
+                                span: name.span,
+                            },
+                        )?;
+                        Some((id, name.name.clone(), ty))
+                    }
+                    None => None,
+                };
+                self.check_block(&arm.body, true)
+                    .map(|body| (binding, body))
+            })();
+            self.scopes.pop();
+            let (binding, body) = checked?;
+            let pattern = match (&arm.pattern.kind, binding) {
+                (lift_ast::MatchPatternKind::Some(_), Some((id, name, ty))) => {
+                    HirMatchPattern::Some(HirMatchBinding {
+                        id,
+                        name,
+                        ty,
+                        requires_mut: self.mutable_bindings.contains(&id),
+                        span: arm.pattern.span,
+                    })
+                }
+                (lift_ast::MatchPatternKind::None, _) => HirMatchPattern::None,
+                (lift_ast::MatchPatternKind::Ok(Some(_)), Some((id, name, ty))) => {
+                    HirMatchPattern::Ok(Some(HirMatchBinding {
+                        id,
+                        name,
+                        ty,
+                        requires_mut: self.mutable_bindings.contains(&id),
+                        span: arm.pattern.span,
+                    }))
+                }
+                (lift_ast::MatchPatternKind::Ok(None), _) => HirMatchPattern::Ok(None),
+                (lift_ast::MatchPatternKind::Err(_), Some((id, name, ty))) => {
+                    HirMatchPattern::Err(HirMatchBinding {
+                        id,
+                        name,
+                        ty,
+                        requires_mut: self.mutable_bindings.contains(&id),
+                        span: arm.pattern.span,
+                    })
+                }
+                _ => unreachable!("binding validation matches the pattern"),
+            };
+            arms.push(HirMatchArm {
+                pattern,
+                body,
+                span: arm.span,
+            });
+        }
+        let required: &[&str] = if error.is_some() {
+            &["ok", "err"]
+        } else {
+            &["some", "none"]
+        };
+        for variant in required {
+            if !seen.contains(*variant) {
+                return Err(SemaError::new(
+                    SemaErrorKind::InvalidMatch,
+                    format!("`match` não é exaustivo: falta o braço `{variant}`"),
+                    statement.span,
+                ));
+            }
+        }
+        Ok(HirStatement::Match(HirMatch {
+            value,
+            arms,
+            span: statement.span,
+        }))
+    }
+
+    /// Métodos higher-order de array (`map`, `filter`, `forEach`, `find`,
+    /// `some`, `every`, `reduce`), monomorfizados pelo tipo do elemento.
+    /// PT-BR: métodos de array com callback, sem generics Lift.
+    fn check_array_method(
+        &mut self,
+        span: Span,
+        method_name: &str,
+        array: HirExpr,
+        element: ResolvedType,
+        call: &lift_ast::CallExpression,
+    ) -> Result<HirExpr, SemaError> {
+        let Some(method) = ArrayMethodKind::from_name(method_name) else {
+            return Err(SemaError::new(
+                SemaErrorKind::UnknownField,
+                format!("array não tem método `{method_name}`"),
+                call.callee.span,
+            ));
+        };
+        let expected_arguments = if method == ArrayMethodKind::Reduce {
+            2
+        } else {
+            1
+        };
+        if call.arguments.len() != expected_arguments {
+            return Err(SemaError::new(
+                SemaErrorKind::ArgumentCountMismatch,
+                format!(
+                    "`{method_name}` espera {expected_arguments} argumento(s), recebeu {}",
+                    call.arguments.len()
+                ),
+                span,
+            ));
+        }
+        let initial = if method == ArrayMethodKind::Reduce {
+            Some(self.synthesize_expr(&call.arguments[0])?)
+        } else {
+            None
+        };
+        let callback_index = if method == ArrayMethodKind::Reduce {
+            1
+        } else {
+            0
+        };
+        let callback = self.synthesize_expr(&call.arguments[callback_index])?;
+        let ResolvedType::Closure(parameters, result) = callback.ty.clone() else {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                format!("`{method_name}` espera uma função como argumento"),
+                callback.span,
+            ));
+        };
+        if method != ArrayMethodKind::Reduce && (parameters.len() != 1 || parameters[0] != element)
+        {
+            return Err(SemaError::new(
+                SemaErrorKind::TypeMismatch,
+                format!("callback de `{method_name}` deve receber `{element}`"),
+                callback.span,
+            ));
+        }
+        let return_type = match method {
+            ArrayMethodKind::Map => ResolvedType::Array(Box::new((*result).clone())),
+            ArrayMethodKind::Filter => {
+                self.require_callback_result(
+                    method_name,
+                    &result,
+                    &ResolvedType::Boolean,
+                    callback.span,
+                )?;
+                ResolvedType::Array(Box::new(element.clone()))
+            }
+            ArrayMethodKind::Find => {
+                self.require_callback_result(
+                    method_name,
+                    &result,
+                    &ResolvedType::Boolean,
+                    callback.span,
+                )?;
+                if matches!(element, ResolvedType::Optional(_)) {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "`find` em array de opcionais exigiria Option aninhado; use `filter`",
+                        call.callee.span,
+                    ));
+                }
+                ResolvedType::Optional(Box::new(element.clone()))
+            }
+            ArrayMethodKind::Some | ArrayMethodKind::Every => {
+                self.require_callback_result(
+                    method_name,
+                    &result,
+                    &ResolvedType::Boolean,
+                    callback.span,
+                )?;
+                ResolvedType::Boolean
+            }
+            ArrayMethodKind::ForEach => {
+                self.require_callback_result(
+                    method_name,
+                    &result,
+                    &ResolvedType::Void,
+                    callback.span,
+                )?;
+                ResolvedType::Void
+            }
+            ArrayMethodKind::Reduce => {
+                let initial = initial.as_ref().unwrap();
+                if parameters.len() != 2
+                    || parameters[0] != initial.ty
+                    || parameters[1] != element
+                    || *result != initial.ty
+                {
+                    return Err(SemaError::new(
+                        SemaErrorKind::TypeMismatch,
+                        format!(
+                            "callback de `reduce` deve ser `({}, {element}) => {}`",
+                            initial.ty, initial.ty
+                        ),
+                        callback.span,
+                    ));
+                }
+                initial.ty.clone()
+            }
+        };
+        let array = self.materialize_owned(array, false);
+        let callback = self.materialize_owned(callback, false);
+        let initial = initial.map(|value| self.materialize_owned(value, false));
+        Ok(self.expr(
+            HirExprKind::ArrayMethod {
+                method,
+                array: Box::new(array),
+                callback: Box::new(callback),
+                initial: initial.map(Box::new),
+            },
+            return_type,
+            span,
+        ))
+    }
+
+    fn require_callback_result(
+        &self,
+        method: &str,
+        actual: &ResolvedType,
+        expected: &ResolvedType,
+        span: Span,
+    ) -> Result<(), SemaError> {
+        if actual != expected {
+            return Err(SemaError::new(
+                SemaErrorKind::TypeMismatch,
+                format!("callback de `{method}` deve retornar `{expected}`, recebido `{actual}`"),
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn check_some(
         &mut self,
         span: Span,
@@ -1772,7 +2787,7 @@ impl<'a> BodyChecker<'a> {
         if !payload.ty.is_value_type() || matches!(payload.ty, ResolvedType::Optional(_)) {
             return Err(SemaError::new(
                 SemaErrorKind::UnsupportedType,
-                "option.some exige valor não void e não opcional",
+                "option.some exige payload de valor (não `void`, função ou opcional)",
                 payload.span,
             ));
         }
@@ -1867,6 +2882,49 @@ impl<'a> BodyChecker<'a> {
         }
     }
 
+    /// Converte uma função nomeada em valor `Box<dyn Fn>` com parâmetros owned.
+    /// PT-BR: função nomeada como valor de callback.
+    fn function_value(
+        &self,
+        name: String,
+        function: &FunctionInfo,
+        span: Span,
+    ) -> Result<HirExpr, SemaError> {
+        if function.return_type.contains_resource()
+            || function
+                .parameters
+                .iter()
+                .any(|parameter| parameter.ty.contains_resource())
+        {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedOwnershipPattern,
+                "função com recursos opacos não pode ser usada como valor",
+                span,
+            ));
+        }
+        let parameters = function
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.ty.clone(), parameter.pass_mode))
+            .collect::<Vec<_>>();
+        let signature = ResolvedType::Closure(
+            parameters
+                .iter()
+                .map(|(ty, _)| ty.clone())
+                .collect::<Vec<_>>(),
+            Box::new(function.return_type.clone()),
+        );
+        Ok(self.expr(
+            HirExprKind::FunctionValue {
+                name,
+                parameters,
+                return_type: function.return_type.clone(),
+            },
+            signature,
+            span,
+        ))
+    }
+
     fn check_closure(
         &mut self,
         closure: &lift_ast::ClosureExpression,
@@ -1885,13 +2943,6 @@ impl<'a> BodyChecker<'a> {
                         span,
                     ));
                 }
-                if matches!(binding.ty, ResolvedType::Closure(..)) {
-                    return Err(SemaError::new(
-                        SemaErrorKind::UnsupportedOwnershipPattern,
-                        "captura de outra closure não é suportada",
-                        span,
-                    ));
-                }
                 let source = self.expr(
                     HirExprKind::Local {
                         id: binding.id,
@@ -1901,6 +2952,15 @@ impl<'a> BodyChecker<'a> {
                     span,
                 );
                 snapshots.push((name, binding.ty, self.materialize_owned(source, false)));
+            }
+        }
+        for (name, _, _) in &snapshots {
+            if block_mutates_name(&closure.body, name) {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnsupportedOwnershipPattern,
+                    "captures de closure são snapshots somente leitura; mutar o capture não é suportado",
+                    span,
+                ));
             }
         }
         let signature = FunctionInfo {
@@ -1944,6 +3004,8 @@ impl<'a> BodyChecker<'a> {
             self.structures,
             self.functions,
             self.next_binding_id,
+            self.next_try_id,
+            self.next_loop_id,
             self.mutable_bindings,
             Some(FunctionContext {
                 return_type: result.clone(),
@@ -1961,6 +3023,7 @@ impl<'a> BodyChecker<'a> {
                     binding: Some(BindingKind::Const),
                     parameter_mode: None,
                     parameter_mutated: false,
+                    narrowed: false,
                     span,
                 },
             )?;
@@ -1983,6 +3046,7 @@ impl<'a> BodyChecker<'a> {
                     binding: None,
                     parameter_mode: Some(pass_mode),
                     parameter_mutated: mutated.contains(&parameter.name.name),
+                    narrowed: false,
                     span: parameter.span,
                 },
             )?;
@@ -2008,7 +3072,7 @@ impl<'a> BodyChecker<'a> {
             unreachable!()
         };
         let body = checked.body;
-        if result != ResolvedType::Void && !block_guarantees_return(&closure.body) {
+        if result != ResolvedType::Void && !block_guarantees_return(&closure.body, 0) {
             return Err(SemaError::new(
                 SemaErrorKind::MissingReturnPath,
                 "closure deve retornar em todos os caminhos",
@@ -2049,6 +3113,13 @@ impl<'a> BodyChecker<'a> {
         span: Span,
         call: &lift_ast::CallExpression,
     ) -> Result<HirExpr, SemaError> {
+        if self.result_constructor(call).is_some() {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "`result.ok`/`result.err` exigem contexto `Result<T, E>`; anote a variável, use em retorno ou passe para uma função",
+                span,
+            ));
+        }
         if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
             if direct_callee_name(&access.object).as_deref() == Some("http")
                 && self.lookup("http").is_none()
@@ -2098,8 +3169,18 @@ impl<'a> BodyChecker<'a> {
             {
                 Some(self.synthesize_expr(&call.callee)?)
             }
-            ExpressionKind::Grouping(inner) if matches!(inner.kind, ExpressionKind::Closure(_)) => {
-                Some(self.synthesize_expr(inner)?)
+            // Chamada imediata do retorno de outra chamada: `make()(3)`.
+            ExpressionKind::Call(_) | ExpressionKind::Grouping(_) => {
+                let callee = self.synthesize_expr(&call.callee)?;
+                if matches!(callee.ty, ResolvedType::Closure(..)) {
+                    Some(callee)
+                } else {
+                    return Err(SemaError::new(
+                        SemaErrorKind::NotCallable,
+                        "expressão chamada não é uma função",
+                        call.callee.span,
+                    ));
+                }
             }
             _ => None,
         };
@@ -2268,6 +3349,9 @@ impl<'a> BodyChecker<'a> {
         }
         if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
             let receiver = self.synthesize_expr(&access.object)?;
+            if let ResolvedType::Array(element) = receiver.ty.clone() {
+                return self.check_array_method(span, &access.field.name, receiver, *element, call);
+            }
             if let ResolvedType::Struct(target) = receiver.ty {
                 let name = method_name(&target, &access.field.name);
                 let mut arguments = vec![(*access.object).clone()];
@@ -2336,7 +3420,7 @@ impl<'a> BodyChecker<'a> {
                 ParameterPassMode::BorrowImm => ArgPassMode::ByRef,
                 ParameterPassMode::BorrowMut => ArgPassMode::ByMutRef,
                 ParameterPassMode::OwnedMove => {
-                    if !expression.ty.contains_resource()
+                    if !expression.ty.is_affine()
                         && !expression.ty.is_copy()
                         && is_place(&expression)
                     {
@@ -2348,6 +3432,20 @@ impl<'a> BodyChecker<'a> {
             };
             let clone_mode = (pass_mode == ArgPassMode::ByClone)
                 .then(|| self.clone_mode_for_expression(&expression));
+            if pass_mode == ArgPassMode::ByMutRef {
+                if let Some(root) = root_binding(&expression) {
+                    if self
+                        .lookup_by_id(root)
+                        .is_some_and(|binding| binding.narrowed)
+                    {
+                        return Err(SemaError::new(
+                            SemaErrorKind::UnsupportedOwnershipPattern,
+                            "chamada mutaria apenas a cópia do valor estreitado; use `option.unwrap` em uma variável própria",
+                            argument.span,
+                        ));
+                    }
+                }
+            }
             arguments.push(HirCallArgument {
                 expression,
                 pass_mode,
@@ -2690,8 +3788,111 @@ impl<'a> BodyChecker<'a> {
         Ok(())
     }
 
+    /// Destinos possíveis de `?`/`throw`, do mais interno ao mais externo.
+    /// PT-BR: candidatos de propagação na ordem try interno → retorno.
+    fn propagation_candidates(&self) -> Vec<(PropagateTarget, ResolvedType)> {
+        let mut candidates = self
+            .try_stack
+            .iter()
+            .rev()
+            .map(|context| (PropagateTarget::Try(context.id), context.error.clone()))
+            .collect::<Vec<_>>();
+        if let Some(function) = &self.function {
+            if let ResolvedType::Result(_, error) = &function.return_type {
+                candidates.push((PropagateTarget::Function, (**error).clone()));
+            }
+        }
+        candidates
+    }
+
+    fn propagation_target(&self, error: &ResolvedType) -> Option<PropagateTarget> {
+        self.propagation_candidates()
+            .into_iter()
+            .find(|(_, candidate)| candidate == error)
+            .map(|(target, _)| target)
+    }
+
+    /// `result.ok`/`result.err` como construtores contextuais de `Result`.
+    /// PT-BR: construtores `result.ok`/`result.err`.
+    fn result_constructor<'e>(&self, call: &'e lift_ast::CallExpression) -> Option<&'e str> {
+        let ExpressionKind::FieldAccess(access) = &call.callee.kind else {
+            return None;
+        };
+        if direct_callee_name(&access.object).as_deref() == Some("result")
+            && self.lookup("result").is_none()
+            && !self.functions.contains_key("result")
+            && !self.structures.contains_key("result")
+            && matches!(access.field.name.as_str(), "ok" | "err")
+        {
+            Some(access.field.name.as_str())
+        } else {
+            None
+        }
+    }
+
+    fn check_result_constructor(
+        &mut self,
+        span: Span,
+        operation: &str,
+        call: &lift_ast::CallExpression,
+        expected: &ResolvedType,
+    ) -> Result<HirExpr, SemaError> {
+        let ResolvedType::Result(ok, error) = expected else {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "`result.ok`/`result.err` exigem contexto `Result<T, E>`; anote a variável, use em retorno ou passe para uma função",
+                span,
+            ));
+        };
+        match operation {
+            "ok" => {
+                if **ok == ResolvedType::Void {
+                    if !call.arguments.is_empty() {
+                        return Err(SemaError::new(
+                            SemaErrorKind::ArgumentCountMismatch,
+                            "`result.ok` sem argumentos quando o sucesso é `void`",
+                            span,
+                        ));
+                    }
+                    return Ok(self.expr(HirExprKind::ResultOk(None), expected.clone(), span));
+                }
+                if call.arguments.len() != 1 {
+                    return Err(SemaError::new(
+                        SemaErrorKind::ArgumentCountMismatch,
+                        "`result.ok` espera exatamente um argumento",
+                        span,
+                    ));
+                }
+                let value = self.check_expr(&call.arguments[0], ok)?;
+                let value = self.materialize_owned(value, false);
+                Ok(self.expr(
+                    HirExprKind::ResultOk(Some(Box::new(value))),
+                    expected.clone(),
+                    span,
+                ))
+            }
+            "err" => {
+                if call.arguments.len() != 1 {
+                    return Err(SemaError::new(
+                        SemaErrorKind::ArgumentCountMismatch,
+                        "`result.err` espera exatamente um argumento",
+                        span,
+                    ));
+                }
+                let value = self.check_expr(&call.arguments[0], error)?;
+                let value = self.materialize_owned(value, false);
+                Ok(self.expr(
+                    HirExprKind::ResultErr(Box::new(value)),
+                    expected.clone(),
+                    span,
+                ))
+            }
+            _ => unreachable!("validated result constructor"),
+        }
+    }
+
     fn materialize_owned(&self, expression: HirExpr, returning: bool) -> HirExpr {
-        if expression.ty.contains_resource() && is_place(&expression) {
+        if expression.ty.is_affine() && is_place(&expression) {
             return HirExpr {
                 ty: expression.ty.clone(),
                 span: expression.span,
@@ -2802,6 +4003,13 @@ fn resolve_type(
         TypeExpressionKind::Result(ok, error) => {
             let ok = resolve_type(ok, known_structs, TypePosition::Return)?;
             let error = resolve_type(error, known_structs, TypePosition::Field)?;
+            if ok.contains_closure() || error.contains_closure() {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnsupportedType,
+                    "funções não podem ser payload de `Result`; use um parâmetro ou retorno direto",
+                    expression.span,
+                ));
+            }
             ResolvedType::Result(Box::new(ok), Box::new(error))
         }
         TypeExpressionKind::Optional(payload) => {
@@ -2815,14 +4023,38 @@ fn resolve_type(
             }
             ResolvedType::Optional(Box::new(payload))
         }
+        TypeExpressionKind::Function(parameters, result) => {
+            let mut resolved = Vec::with_capacity(parameters.len());
+            for parameter in parameters {
+                let ty = resolve_type(parameter, known_structs, TypePosition::Parameter)?;
+                if ty == ResolvedType::Void {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        "parâmetro de função não pode ser `void`",
+                        parameter.span,
+                    ));
+                }
+                resolved.push(ty);
+            }
+            let result = resolve_type(result, known_structs, TypePosition::Return)?;
+            ResolvedType::Closure(resolved, Box::new(result))
+        }
     };
 
     let valid_position = match position {
-        TypePosition::Field | TypePosition::Parameter | TypePosition::Variable => {
-            resolved.is_value_type()
+        TypePosition::Field => resolved.is_value_type(),
+        TypePosition::Parameter | TypePosition::Variable => {
+            resolved.is_value_type() || matches!(resolved, ResolvedType::Closure(..))
         }
         TypePosition::Return => true,
     };
+    if matches!(position, TypePosition::Field) && matches!(resolved, ResolvedType::Closure(..)) {
+        return Err(SemaError::new(
+            SemaErrorKind::UnsupportedType,
+            "funções não podem ser campos, elementos de array nem payloads de Option/Result",
+            expression.span,
+        ));
+    }
     if (matches!(position, TypePosition::Field) && resolved.contains_resource())
         || matches!(&resolved, ResolvedType::Array(t) | ResolvedType::Optional(t) if t.contains_resource())
         || matches!(&resolved, ResolvedType::Result(_, e) if e.contains_resource())
@@ -2995,9 +4227,31 @@ fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<Bin
                 collect_nested_mut_borrow_roots(value, roots);
             }
         }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            collect_nested_mut_borrow_roots(array, roots);
+            collect_nested_mut_borrow_roots(callback, roots);
+            if let Some(initial) = initial {
+                collect_nested_mut_borrow_roots(initial, roots);
+            }
+        }
+        HirExprKind::FunctionValue { .. } => {}
 
         HirExprKind::OptionNone => {}
         HirExprKind::OptionSome(payload) => collect_nested_mut_borrow_roots(payload, roots),
+        HirExprKind::ResultOk(value) => {
+            if let Some(value) = value {
+                collect_nested_mut_borrow_roots(value, roots);
+            }
+        }
+        HirExprKind::ResultErr(value) => collect_nested_mut_borrow_roots(value, roots),
+        HirExprKind::TryPropagate { expression, .. } => {
+            collect_nested_mut_borrow_roots(expression, roots)
+        }
         HirExprKind::Coalesce {
             option, fallback, ..
         } => {
@@ -3054,8 +4308,22 @@ fn hir_contains_call(expression: &HirExpr) -> bool {
             captures.iter().any(|(_, value)| hir_contains_call(value))
         }
         HirExprKind::ClosureCall { .. } => true,
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            hir_contains_call(array)
+                || hir_contains_call(callback)
+                || initial.as_deref().is_some_and(hir_contains_call)
+        }
+        HirExprKind::FunctionValue { .. } => false,
         HirExprKind::OptionNone => false,
         HirExprKind::OptionSome(payload) => hir_contains_call(payload),
+        HirExprKind::ResultOk(value) => value.as_deref().is_some_and(hir_contains_call),
+        HirExprKind::ResultErr(value) => hir_contains_call(value),
+        HirExprKind::TryPropagate { expression, .. } => hir_contains_call(expression),
         HirExprKind::Coalesce {
             option, fallback, ..
         } => hir_contains_call(option) || hir_contains_call(fallback),
@@ -3099,9 +4367,29 @@ fn collect_hir_binding_uses(expression: &HirExpr, uses: &mut HashSet<BindingId>)
                 collect_hir_binding_uses(value, uses);
             }
         }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            collect_hir_binding_uses(array, uses);
+            collect_hir_binding_uses(callback, uses);
+            if let Some(initial) = initial {
+                collect_hir_binding_uses(initial, uses);
+            }
+        }
+        HirExprKind::FunctionValue { .. } => {}
 
         HirExprKind::OptionNone => {}
         HirExprKind::OptionSome(payload) => collect_hir_binding_uses(payload, uses),
+        HirExprKind::ResultOk(value) => {
+            if let Some(value) = value {
+                collect_hir_binding_uses(value, uses);
+            }
+        }
+        HirExprKind::ResultErr(value) => collect_hir_binding_uses(value, uses),
+        HirExprKind::TryPropagate { expression, .. } => collect_hir_binding_uses(expression, uses),
         HirExprKind::Coalesce {
             option, fallback, ..
         } => {
@@ -3170,6 +4458,16 @@ fn block_mutates_name(block: &Block, name: &str) -> bool {
         }
         Statement::If(statement) => if_mutates_name(statement, name),
         Statement::While(statement) => block_mutates_name(&statement.body, name),
+        Statement::ForOf(statement) => block_mutates_name(&statement.body, name),
+        Statement::Match(statement) => statement
+            .arms
+            .iter()
+            .any(|arm| block_mutates_name(&arm.body, name)),
+        Statement::TryCatch(statement) => {
+            block_mutates_name(&statement.body, name)
+                || (statement.catch_name.name != name
+                    && block_mutates_name(&statement.catch_body, name))
+        }
         _ => false,
     })
 }
@@ -3182,6 +4480,17 @@ fn block_returns_name(block: &Block, name: &str) -> bool {
             .is_some_and(|expression| expression_contains_owned_name(expression, name)),
         Statement::If(statement) => if_returns_name(statement, name),
         Statement::While(statement) => block_returns_name(&statement.body, name),
+        Statement::ForOf(statement) => block_returns_name(&statement.body, name),
+        Statement::Match(statement) => statement
+            .arms
+            .iter()
+            .any(|arm| block_returns_name(&arm.body, name)),
+        Statement::Throw(statement) => expression_contains_owned_name(&statement.value, name),
+        Statement::TryCatch(statement) => {
+            block_returns_name(&statement.body, name)
+                || (statement.catch_name.name != name
+                    && block_returns_name(&statement.catch_body, name))
+        }
         _ => false,
     })
 }
@@ -3221,6 +4530,7 @@ fn expression_contains_owned_name(expression: &Expression, name: &str) -> bool {
             .iter()
             .any(|element| expression_contains_owned_name(element, name)),
         ExpressionKind::Grouping(inner) => expression_contains_owned_name(inner, name),
+        ExpressionKind::TryPropagate(inner) => expression_contains_owned_name(inner, name),
         // Campo/elemento calculado e argumento de função não carregam
         // ownership do agregado de origem nesta implementação: lugares são
         // clonados quando convertidos em valores owned.
@@ -3274,10 +4584,33 @@ fn collect_forwarded_mut_parameters(
                 collect_forwarded_mut_expr(&statement.condition, caller, functions, needs_mut);
                 collect_forwarded_mut_parameters(&statement.body, caller, functions, needs_mut);
             }
+            Statement::Match(statement) => {
+                collect_forwarded_mut_expr(&statement.value, caller, functions, needs_mut);
+                for arm in &statement.arms {
+                    collect_forwarded_mut_parameters(&arm.body, caller, functions, needs_mut);
+                }
+            }
+            Statement::ForOf(statement) => {
+                collect_forwarded_mut_expr(&statement.iterable, caller, functions, needs_mut);
+                collect_forwarded_mut_parameters(&statement.body, caller, functions, needs_mut);
+            }
+            Statement::Break(_) | Statement::Continue(_) => {}
             Statement::Return(statement) => {
                 if let Some(expression) = &statement.value {
                     collect_forwarded_mut_expr(expression, caller, functions, needs_mut);
                 }
+            }
+            Statement::Throw(statement) => {
+                collect_forwarded_mut_expr(&statement.value, caller, functions, needs_mut);
+            }
+            Statement::TryCatch(statement) => {
+                collect_forwarded_mut_parameters(&statement.body, caller, functions, needs_mut);
+                collect_forwarded_mut_parameters(
+                    &statement.catch_body,
+                    caller,
+                    functions,
+                    needs_mut,
+                );
             }
             Statement::Expression(statement) => {
                 collect_forwarded_mut_expr(&statement.expression, caller, functions, needs_mut)
@@ -3433,6 +4766,9 @@ fn collect_forwarded_mut_expr(
         ExpressionKind::Grouping(inner) => {
             collect_forwarded_mut_expr(inner, caller, functions, needs_mut)
         }
+        ExpressionKind::TryPropagate(inner) => {
+            collect_forwarded_mut_expr(inner, caller, functions, needs_mut)
+        }
         ExpressionKind::IntegerLiteral(_)
         | ExpressionKind::NumberLiteral(_)
         | ExpressionKind::StringLiteral(_)
@@ -3442,31 +4778,222 @@ fn collect_forwarded_mut_expr(
     }
 }
 
-fn block_guarantees_return(block: &Block) -> bool {
+/// Todas as rotas do bloco saem dele (`return`, `throw` ou `if` com os dois
+/// braços saindo). `throw` sai do bloco mesmo quando o destino é um `catch`.
+fn block_guarantees_exit(block: &Block) -> bool {
     for statement in &block.statements {
         match statement {
-            Statement::Return(_) => return true,
+            Statement::Return(_) | Statement::Throw(_) => return true,
             Statement::If(statement) => {
-                if if_guarantees_return(statement) {
+                if if_guarantees_exit(statement) {
                     return true;
                 }
             }
-            // Um while pode executar zero vezes.
+            Statement::Match(statement) => {
+                if statement
+                    .arms
+                    .iter()
+                    .all(|arm| block_guarantees_exit(&arm.body))
+                {
+                    return true;
+                }
+            }
             _ => {}
         }
     }
     false
 }
 
-fn if_guarantees_return(statement: &lift_ast::IfStatement) -> bool {
-    block_guarantees_return(&statement.then_branch)
+fn if_guarantees_exit(statement: &lift_ast::IfStatement) -> bool {
+    block_guarantees_exit(&statement.then_branch)
         && statement
             .else_branch
             .as_ref()
             .is_some_and(|branch| match &branch.kind {
-                ElseBranchKind::Block(block) => block_guarantees_return(block),
-                ElseBranchKind::ElseIf(nested) => if_guarantees_return(nested),
+                ElseBranchKind::Block(block) => block_guarantees_exit(block),
+                ElseBranchKind::ElseIf(nested) => if_guarantees_exit(nested),
             })
+}
+
+/// Todas as rotas retornam da função. `try_depth` conta blocos `try` ativos:
+/// um `throw` só retorna da função quando não há catch interno (depth 0).
+fn block_guarantees_return(block: &Block, try_depth: usize) -> bool {
+    for statement in &block.statements {
+        match statement {
+            Statement::Return(_) => return true,
+            Statement::Throw(_) => return try_depth == 0,
+            Statement::If(statement) => {
+                if if_guarantees_return(statement, try_depth) {
+                    return true;
+                }
+            }
+            Statement::Match(statement) => {
+                if statement
+                    .arms
+                    .iter()
+                    .all(|arm| block_guarantees_return(&arm.body, try_depth))
+                {
+                    return true;
+                }
+            }
+            Statement::TryCatch(statement) => {
+                if block_guarantees_return(&statement.body, try_depth + 1)
+                    || (block_guarantees_exit(&statement.body)
+                        && block_guarantees_return(&statement.catch_body, try_depth))
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn if_guarantees_return(statement: &lift_ast::IfStatement, try_depth: usize) -> bool {
+    block_guarantees_return(&statement.then_branch, try_depth)
+        && statement
+            .else_branch
+            .as_ref()
+            .is_some_and(|branch| match &branch.kind {
+                ElseBranchKind::Block(block) => block_guarantees_return(block, try_depth),
+                ElseBranchKind::ElseIf(nested) => if_guarantees_return(nested, try_depth),
+            })
+}
+
+fn dedupe_facts(facts: Vec<NarrowFact>) -> Vec<NarrowFact> {
+    let mut seen = HashSet::new();
+    facts
+        .into_iter()
+        .filter(|fact| seen.insert(fact.source))
+        .collect()
+}
+
+/// Mantém apenas fatos válidos em ambos os caminhos de continuação.
+/// PT-BR: interseção de fatos de caminhos alternativos.
+fn intersect_facts(left: &[NarrowFact], right: &[NarrowFact]) -> Vec<NarrowFact> {
+    let mut kept: Vec<NarrowFact> = Vec::new();
+    for fact in left {
+        let Some(other) = right.iter().find(|other| other.source == fact.source) else {
+            continue;
+        };
+        if other.payload != fact.payload
+            || kept.iter().any(|existing| existing.source == fact.source)
+        {
+            continue;
+        }
+        kept.push(fact.clone());
+    }
+    kept
+}
+
+// Detecção textual conservadora de uso de um nome, usada apenas para evitar
+// clones de narrowing quando o binding derivado nunca seria lido.
+// PT-BR: uso textual conservador do nome para evitar clones desnecessários.
+fn block_mentions_name(block: &Block, name: &str) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|statement| statement_mentions_name(statement, name))
+}
+
+fn statement_mentions_name(statement: &Statement, name: &str) -> bool {
+    match statement {
+        Statement::Variable(variable) => expression_mentions_name(&variable.initializer, name),
+        Statement::Assignment(assignment) => {
+            expression_mentions_name(&assignment.target, name)
+                || expression_mentions_name(&assignment.value, name)
+        }
+        Statement::If(statement) => if_mentions_name(statement, name),
+        Statement::While(statement) => {
+            expression_mentions_name(&statement.condition, name)
+                || block_mentions_name(&statement.body, name)
+        }
+        Statement::Match(statement) => {
+            expression_mentions_name(&statement.value, name)
+                || statement.arms.iter().any(|arm| {
+                    let binding_matches = match &arm.pattern.kind {
+                        lift_ast::MatchPatternKind::Some(binding)
+                        | lift_ast::MatchPatternKind::Err(binding) => binding.name == name,
+                        lift_ast::MatchPatternKind::Ok(Some(binding)) => binding.name == name,
+                        lift_ast::MatchPatternKind::None | lift_ast::MatchPatternKind::Ok(None) => {
+                            false
+                        }
+                    };
+                    !binding_matches && block_mentions_name(&arm.body, name)
+                })
+        }
+        Statement::ForOf(statement) => {
+            expression_mentions_name(&statement.iterable, name)
+                || (statement.name.name != name && block_mentions_name(&statement.body, name))
+        }
+        Statement::Break(_) | Statement::Continue(_) => false,
+        Statement::Return(statement) => statement
+            .value
+            .as_ref()
+            .is_some_and(|value| expression_mentions_name(value, name)),
+        Statement::Throw(statement) => expression_mentions_name(&statement.value, name),
+        Statement::TryCatch(statement) => {
+            block_mentions_name(&statement.body, name)
+                || (statement.catch_name.name != name
+                    && block_mentions_name(&statement.catch_body, name))
+        }
+        Statement::Expression(statement) => expression_mentions_name(&statement.expression, name),
+    }
+}
+
+fn if_mentions_name(statement: &lift_ast::IfStatement, name: &str) -> bool {
+    expression_mentions_name(&statement.condition, name)
+        || block_mentions_name(&statement.then_branch, name)
+        || statement
+            .else_branch
+            .as_ref()
+            .is_some_and(|branch| match &branch.kind {
+                ElseBranchKind::Block(block) => block_mentions_name(block, name),
+                ElseBranchKind::ElseIf(nested) => if_mentions_name(nested, name),
+            })
+}
+
+fn expression_mentions_name(expression: &Expression, name: &str) -> bool {
+    match &expression.kind {
+        ExpressionKind::Identifier(identifier) => identifier.name == name,
+        ExpressionKind::Closure(closure) => block_mentions_name(&closure.body, name),
+        ExpressionKind::Template(parts) => parts
+            .iter()
+            .any(|part| expression_mentions_name(part, name)),
+        ExpressionKind::IntegerLiteral(_)
+        | ExpressionKind::NumberLiteral(_)
+        | ExpressionKind::StringLiteral(_)
+        | ExpressionKind::BooleanLiteral(_)
+        | ExpressionKind::NullLiteral => false,
+        ExpressionKind::ObjectLiteral(object) => object
+            .fields
+            .iter()
+            .any(|field| expression_mentions_name(&field.value, name)),
+        ExpressionKind::ArrayLiteral(array) => array
+            .elements
+            .iter()
+            .any(|element| expression_mentions_name(element, name)),
+        ExpressionKind::Unary(unary) => expression_mentions_name(&unary.operand, name),
+        ExpressionKind::Binary(binary) => {
+            expression_mentions_name(&binary.left, name)
+                || expression_mentions_name(&binary.right, name)
+        }
+        ExpressionKind::FieldAccess(access) => expression_mentions_name(&access.object, name),
+        ExpressionKind::Call(call) => {
+            expression_mentions_name(&call.callee, name)
+                || call
+                    .arguments
+                    .iter()
+                    .any(|argument| expression_mentions_name(argument, name))
+        }
+        ExpressionKind::Index(index) => {
+            expression_mentions_name(&index.object, name)
+                || expression_mentions_name(&index.index, name)
+        }
+        ExpressionKind::Grouping(inner) => expression_mentions_name(inner, name),
+        ExpressionKind::TryPropagate(inner) => expression_mentions_name(inner, name),
+    }
 }
 
 fn visit_struct(
@@ -3475,6 +5002,11 @@ fn visit_struct(
     state: &mut HashMap<String, u8>,
     stack: &mut Vec<String>,
 ) -> Option<Span> {
+    // O layout de um tipo Rust externo é responsabilidade da crate; não há
+    // aresta de tamanho a percorrer a partir dele.
+    if structures.get(name).is_some_and(|info| info.external) {
+        return None;
+    }
     match state.get(name).copied().unwrap_or(0) {
         1 => return structures.get(name).map(|info| info.span),
         2 => return None,
@@ -3531,8 +5063,31 @@ fn apply_mutable_binding_flags(declarations: &mut [HirDeclaration], mutable: &Ha
                     }
                 }
                 HirStatement::While(statement) => apply_block(&mut statement.body, mutable),
-                HirStatement::Assignment(_)
+                HirStatement::ForOf(statement) => apply_block(&mut statement.body, mutable),
+                HirStatement::Match(statement) => {
+                    for arm in &mut statement.arms {
+                        match &mut arm.pattern {
+                            HirMatchPattern::Some(binding) | HirMatchPattern::Err(binding) => {
+                                binding.requires_mut = mutable.contains(&binding.id);
+                            }
+                            HirMatchPattern::Ok(Some(binding)) => {
+                                binding.requires_mut = mutable.contains(&binding.id);
+                            }
+                            HirMatchPattern::None | HirMatchPattern::Ok(None) => {}
+                        }
+                        apply_block(&mut arm.body, mutable);
+                    }
+                }
+                HirStatement::TryCatch(statement) => {
+                    apply_block(&mut statement.body, mutable);
+                    apply_block(&mut statement.catch_body, mutable);
+                }
+                HirStatement::Throw(_)
+                | HirStatement::Narrow(_)
+                | HirStatement::Assignment(_)
                 | HirStatement::Return(_)
+                | HirStatement::Break(_)
+                | HirStatement::Continue(_)
                 | HirStatement::Expression(_) => {}
             }
         }
@@ -3559,7 +5114,9 @@ fn apply_mutable_binding_flags(declarations: &mut [HirDeclaration], mutable: &Ha
                     *statement = rewritten;
                 }
             }
-            HirDeclaration::Struct(_) | HirDeclaration::Import(_) => {}
+            HirDeclaration::Struct(_)
+            | HirDeclaration::ExternStruct(_)
+            | HirDeclaration::Import(_) => {}
         }
     }
 }

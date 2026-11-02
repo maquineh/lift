@@ -2,6 +2,8 @@
 //!
 //! PT-BR: Validação de destinos de imports Rust explícitos e tipos FFI suportados.
 
+use std::collections::HashSet;
+
 use lift_ast::Span;
 
 use crate::{ResolvedType, RustDependency, SemaError, SemaErrorKind};
@@ -105,48 +107,90 @@ pub(crate) fn validate_type(
     ty: &ResolvedType,
     returning: bool,
     span: Span,
+    extern_structs: &HashSet<String>,
 ) -> Result<(), SemaError> {
-    if contains_optional(ty) {
-        return Err(SemaError::new(
-            SemaErrorKind::UnsupportedType,
-            "Option/T? não é suportado no FFI",
-            span,
-        ));
+    let direct = validate_value(ty, extern_structs)
+        || matches!(ty, ResolvedType::Optional(payload) if validate_value(payload, extern_structs))
+        || validate_callback(ty, extern_structs)
+        || (returning && *ty == ResolvedType::Void);
+    if direct {
+        return Ok(());
     }
-    let primitive = |ty: &ResolvedType| {
-        matches!(
-            ty,
-            ResolvedType::Int | ResolvedType::Number | ResolvedType::Boolean | ResolvedType::String
-        )
-    };
     if let ResolvedType::Result(ok, error) = ty {
-        if returning && !matches!(**ok, ResolvedType::Result(_, _)) {
-            validate_type(ok, true, span)?;
-            validate_type(error, false, span)?;
+        // Result é aceito em parâmetro (emprestado) e retorno. O payload pode
+        // conter um Option direto; Result aninhado continua fora.
+        let ok_valid = if **ok == ResolvedType::Void {
+            returning
+        } else {
+            validate_payload(ok, extern_structs)
+        };
+        if ok_valid && validate_payload(error, extern_structs) {
             return Ok(());
         }
     }
-    if primitive(ty)
-        || matches!(ty, ResolvedType::Array(element) if primitive(element))
-        || (returning && *ty == ResolvedType::Void)
-    {
-        Ok(())
-    } else {
-        Err(SemaError::new(
-            SemaErrorKind::UnsupportedType,
-            "FFI aceita primitivos, arrays de primitivos, retorno void e retorno Result<T, E>",
-            span,
-        ))
-    }
+    Err(SemaError::new(
+        SemaErrorKind::UnsupportedType,
+        "FFI aceita primitivos, string, arrays rasos, structs externas, Option<T> direto, Result<T, E> com payload direto, retorno void, e Result com um Option no payload",
+        span,
+    ))
 }
 
-fn contains_optional(ty: &ResolvedType) -> bool {
-    match ty {
-        ResolvedType::Optional(_) => true,
-        ResolvedType::Array(element) => contains_optional(element),
-        ResolvedType::Result(ok, error) => contains_optional(ok) || contains_optional(error),
-        _ => false,
+/// Callback FFI: `(owned...) => owned`; assinatura sem Option/Result/closure.
+/// PT-BR: callback FFI com payloads owned simples; sem aninhamento.
+fn validate_callback(ty: &ResolvedType, extern_structs: &HashSet<String>) -> bool {
+    let ResolvedType::Closure(parameters, result) = ty else {
+        return false;
+    };
+    parameters
+        .iter()
+        .all(|parameter| validate_value(parameter, extern_structs))
+        && (**result == ResolvedType::Void || validate_value(result, extern_structs))
+}
+
+/// Payload aceito dentro de `Result`: um valor direto ou um `Option` direto.
+/// PT-BR: payload de Result; permite um nível de Option.
+fn validate_payload(ty: &ResolvedType, extern_structs: &HashSet<String>) -> bool {
+    validate_value(ty, extern_structs)
+        || matches!(ty, ResolvedType::Optional(payload) if validate_value(payload, extern_structs))
+}
+
+/// Campo de um layout externo: valor direto ou um `Option` direto.
+/// `Result` não é aceito como campo de struct externa.
+/// PT-BR: campo de layout externo; Result não é aceito.
+pub(crate) fn validate_field_type(
+    ty: &ResolvedType,
+    span: Span,
+    extern_structs: &HashSet<String>,
+) -> Result<(), SemaError> {
+    if validate_payload(ty, extern_structs) {
+        return Ok(());
     }
+    Err(SemaError::new(
+        SemaErrorKind::UnsupportedType,
+        "layout externo aceita primitivos, string, arrays rasos, structs externas e Option<T> direto",
+        span,
+    ))
+}
+
+/// Tipos escalares/containers aceitos dentro de `Option` e arrays.
+/// PT-BR: tipos aceitos como payload direto, sem Option/Result aninhados.
+fn validate_value(ty: &ResolvedType, extern_structs: &HashSet<String>) -> bool {
+    let structural = match ty {
+        ResolvedType::Int | ResolvedType::Number | ResolvedType::Boolean | ResolvedType::String => {
+            true
+        }
+        ResolvedType::Struct(name) => extern_structs.contains(name),
+        ResolvedType::Array(element) => match &**element {
+            ResolvedType::Int
+            | ResolvedType::Number
+            | ResolvedType::Boolean
+            | ResolvedType::String => true,
+            ResolvedType::Struct(name) => extern_structs.contains(name),
+            _ => false,
+        },
+        _ => false,
+    };
+    structural
 }
 
 pub(crate) fn resolve_source(
@@ -218,7 +262,7 @@ pub(crate) fn resolve_source(
     ))
 }
 
-fn rust_identifier(name: &str) -> bool {
+pub(crate) fn rust_identifier(name: &str) -> bool {
     let mut bytes = name.bytes();
     matches!(bytes.next(), Some(first) if first.is_ascii_alphabetic() || first == b'_')
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')

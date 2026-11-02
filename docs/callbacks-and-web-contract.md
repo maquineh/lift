@@ -10,7 +10,11 @@ owned `Request`/`Response` DTOs, named synchronous handlers, and static
 `GET /health`, `GET /notes`, and `POST /notes` routes. Those DTOs, handlers and
 route registrations are now declared in Lift, with generated bridges to a
 generic Rust adapter. See [the implemented subset](resources-and-http.md).
-Escaping Lift closures and arbitrary FFI callbacks remain unsupported.
+Escaping Lift closures and arbitrary FFI callbacks remain unsupported. Direct
+function-typed parameters/returns are now first-class language values and safe FFI
+callbacks; see [function types and callbacks](higher-order.md). Arbitrary callback
+signatures, nested callbacks in payloads, async handlers, and HTTP handler values
+remain outside this contract.
 
 ## First handler model
 

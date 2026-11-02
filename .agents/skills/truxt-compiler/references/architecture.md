@@ -56,7 +56,7 @@ está em `modules-decisions.md`. Os demais contratos estão em `codegen-cli-deci
 O incremento atual exige Rust/Cargo 1.94.1+ e acrescenta métodos nominais/impl,
 closures locais com captura snapshot e templates primitivos contextuais. Consulte
 `methods-closures-templates-decisions.md` para os contratos, diferenças em relação
-ao TypeScript e limites de ownership; callbacks/escape de closure seguem fora.
+ao TypeScript e limites de ownership; o incremento higher-order posterior tornou callbacks valores de primeira classe em parâmetro/retorno (ver `methods-closures-templates-decisions.md`). `while` e `for...of` com `break`/`continue` estão descritos em `docs/loops*.md`; um laço não conta como retorno garantido.
 
 ## Pipelines
 
@@ -138,7 +138,7 @@ PostfixExpr   ::= PrimaryExpr ("." Ident | "(" ArgList? ")" | "[" Expr "]")*
 PrimaryExpr   ::= IntLit | FloatLit | StrLit | BoolLit | Ident | ObjectLit | ArrayLit | "(" Expr ")"
 ```
 
-Esta gramática é um resumo, não uma especificação completa: não detalha operadores/precedências, regras de atribuição, tipos opcionais, unions, `impl` ou template strings. O contrato limitado de imports/FFI e `console.log` está em `phase5-decisions.md`; ele não define imports arbitrários, generics ou tipos struct. A existência de uma funcionalidade no roadmap sem produção gramatical correspondente é uma lacuna a resolver no escopo da fase, não licença para inventar sintaxe silenciosamente.
+Esta gramática é um resumo, não uma especificação completa: não detalha operadores/precedências, regras de atribuição, tipos opcionais, unions, `impl` ou template strings. O contrato limitado de imports/FFI e `console.log` está em `phase5-decisions.md`; ele não define imports arbitrários nem generics. Structs externas são declaradas por `import interface ... from` e mapeadas para tipos Rust no incremento registrado em `phase5-decisions.md`; Option direto em parâmetro/retorno também pertence a esse incremento. A existência de uma funcionalidade no roadmap sem produção gramatical correspondente é uma lacuna a resolver no escopo da fase, não licença para inventar sintaxe silenciosamente.
 
 ## Mapeamento de tipos fornecido
 
@@ -185,7 +185,7 @@ Estas são as assinaturas exatas fornecidas como contratos-alvo. Confira a imple
 - Mutabilidade de `const` versus mutabilidade dos campos, e semântica de identidade/valor ao atribuir tipos não-`Copy` ou inserir `.clone()`.
 - Regras completas de ownership, borrowing, clonagem, liveness e aliasing, inclusive chamadas transitivas, recursão, caminhos condicionais e argumentos que referem o mesmo objeto.
 - Inferência nominal para object literals sem tipo esperado ou diagnóstico correspondente.
-- Tratamento concreto de `try`/`catch` versus `Result` e construção/seleção de variantes de unions.
+- Tratamento concreto de `try`/`catch` versus `Result` foi decidido no incremento de erros (`phase4-decisions.md`): `throw`/`?` produzem `Err` para o catch compatível ou para o retorno `Result<_, E>` exato, sem conversão `From`. Construção e seleção de variantes de unions continuam fora.
 - Imports/FFI gerais continuam fora do contrato: o MVP da Fase 5 declara assinaturas explícitas para funções seguras e tipos limitados; adicionar uma crate ao Cargo não fornece por si só assinaturas nem mapeamento de tipos.
 - Política de dependências, chave do cache para entradas/configurações e estrutura final do Cargo gerado.
 - Nome final do comando CLI (`liftc` aparece no exemplo inicial de comandos; o exemplo de execução usa `lift`).

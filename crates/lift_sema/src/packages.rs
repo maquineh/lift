@@ -131,6 +131,7 @@ pub fn analyze_project(project: ProjectAst) -> Result<HirProgram, Vec<SemaError>
             let name = match declaration {
                 Declaration::Function(f) => Some(&f.name),
                 Declaration::Interface(i) => Some(&i.name),
+                Declaration::ImportInterface(i) => Some(&i.name),
                 Declaration::Import(i) => Some(&i.name),
                 _ => None,
             };
@@ -193,19 +194,24 @@ pub fn analyze_project(project: ProjectAst) -> Result<HirProgram, Vec<SemaError>
     // Rust FFI constraints apply to the final generated Cargo project as well.
     let mut rust_dependencies = HashMap::new();
     for declaration in &output.declarations {
-        if let HirDeclaration::Import(import) = declaration {
-            let name = import.rust_path.split("::").next().unwrap();
-            if let Some((dependency, span)) =
-                rust_dependencies.insert(name.to_owned(), (&import.dependency, import.span))
-            {
-                if dependency != &import.dependency {
-                    return Err(vec![SemaError::new(
-                        SemaErrorKind::InvalidImport,
-                        format!("dependências Rust incompatíveis para `{name}` entre pacotes"),
-                        import.span,
-                    )
-                    .with_secondary(span)]);
-                }
+        let (rust_path, dependency, span) = match declaration {
+            HirDeclaration::Import(import) => (&import.rust_path, &import.dependency, import.span),
+            HirDeclaration::ExternStruct(structure) => {
+                (&structure.rust_path, &structure.dependency, structure.span)
+            }
+            _ => continue,
+        };
+        let name = rust_path.split("::").next().unwrap();
+        if let Some((previous, previous_span)) =
+            rust_dependencies.insert(name.to_owned(), (dependency, span))
+        {
+            if previous != dependency {
+                return Err(vec![SemaError::new(
+                    SemaErrorKind::InvalidImport,
+                    format!("dependências Rust incompatíveis para `{name}` entre pacotes"),
+                    span,
+                )
+                .with_secondary(previous_span)]);
             }
         }
     }
@@ -250,6 +256,9 @@ fn qualify(hir: &mut HirProgram, package: PackageId, next: &mut u32) {
             HirDeclaration::Struct(s) => {
                 q.structures.insert(s.name.clone());
             }
+            HirDeclaration::ExternStruct(s) => {
+                q.structures.insert(s.name.clone());
+            }
             _ => {}
         }
     }
@@ -271,6 +280,12 @@ fn qualify(hir: &mut HirProgram, package: PackageId, next: &mut u32) {
                 q.ty(&mut i.return_type);
             }
             HirDeclaration::Struct(s) => {
+                s.name = symbol(package, &s.name);
+                for f in &mut s.fields {
+                    q.ty(&mut f.ty);
+                }
+            }
+            HirDeclaration::ExternStruct(s) => {
                 s.name = symbol(package, &s.name);
                 for f in &mut s.fields {
                     q.ty(&mut f.ty);
@@ -334,6 +349,11 @@ impl Qualifier {
                 self.ty(&mut v.ty);
                 self.expr(&mut v.initializer);
             }
+            HirStatement::Narrow(n) => {
+                self.id(&mut n.id);
+                self.id(&mut n.source);
+                self.ty(&mut n.ty);
+            }
             HirStatement::Assignment(a) => {
                 self.expr(&mut a.target);
                 self.expr(&mut a.value);
@@ -343,10 +363,42 @@ impl Qualifier {
                 self.expr(&mut w.condition);
                 self.block(&mut w.body);
             }
+            HirStatement::ForOf(f) => {
+                self.id(&mut f.id);
+                self.ty(&mut f.element_ty);
+                self.expr(&mut f.iterable);
+                self.block(&mut f.body);
+            }
+            HirStatement::Match(m) => {
+                self.expr(&mut m.value);
+                for arm in &mut m.arms {
+                    match &mut arm.pattern {
+                        crate::HirMatchPattern::Some(binding)
+                        | crate::HirMatchPattern::Err(binding) => {
+                            self.id(&mut binding.id);
+                            self.ty(&mut binding.ty);
+                        }
+                        crate::HirMatchPattern::Ok(Some(binding)) => {
+                            self.id(&mut binding.id);
+                            self.ty(&mut binding.ty);
+                        }
+                        crate::HirMatchPattern::None | crate::HirMatchPattern::Ok(None) => {}
+                    }
+                    self.block(&mut arm.body);
+                }
+            }
+            HirStatement::Break(_) | HirStatement::Continue(_) => {}
             HirStatement::Return(r) => {
                 if let Some(v) = &mut r.value {
                     self.expr(v);
                 }
+            }
+            HirStatement::Throw(t) => self.expr(&mut t.value),
+            HirStatement::TryCatch(t) => {
+                self.block(&mut t.body);
+                self.id(&mut t.catch_id);
+                self.ty(&mut t.catch_ty);
+                self.block(&mut t.catch_body);
             }
             HirStatement::Expression(e) => self.expr(&mut e.expression),
         }
@@ -375,11 +427,39 @@ impl Qualifier {
                     self.expr(a);
                 }
             }
+            HirExprKind::ArrayMethod {
+                array,
+                callback,
+                initial,
+                ..
+            } => {
+                self.expr(array);
+                self.expr(callback);
+                if let Some(initial) = initial {
+                    self.expr(initial);
+                }
+            }
+            HirExprKind::FunctionValue {
+                name,
+                parameters,
+                return_type,
+            } => {
+                if self.functions.contains(name) {
+                    *name = symbol(self.package, name);
+                }
+                for (ty, _) in parameters {
+                    self.ty(ty);
+                }
+                self.ty(return_type);
+            }
             HirExprKind::OptionSome(e)
             | HirExprKind::Grouping(e)
             | HirExprKind::Move(e)
             | HirExprKind::Clone { expression: e, .. }
             | HirExprKind::Unary { operand: e, .. } => self.expr(e),
+            HirExprKind::ResultOk(Some(e)) | HirExprKind::ResultErr(e) => self.expr(e),
+            HirExprKind::ResultOk(None) => {}
+            HirExprKind::TryPropagate { expression, .. } => self.expr(expression),
             HirExprKind::Coalesce {
                 option, fallback, ..
             } => {

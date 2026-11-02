@@ -32,6 +32,9 @@ pub enum Declaration {
     Interface(InterfaceDeclaration),
     Function(FunctionDeclaration),
     Import(ImportFunctionDeclaration),
+    /// Interface externa mapeada para um tipo Rust declarado em outra crate.
+    /// PT-BR: interface externa mapeada para um tipo Rust de outra crate.
+    ImportInterface(ImportInterfaceDeclaration),
     ModuleImport(ModuleImportDeclaration),
     PackageImport(PackageImportDeclaration),
     ExportFunction(FunctionDeclaration),
@@ -45,6 +48,7 @@ impl Declaration {
             Self::Interface(node) => node.span,
             Self::Function(node) => node.span,
             Self::Import(node) => node.span,
+            Self::ImportInterface(node) => node.span,
             Self::ModuleImport(node) => node.span,
             Self::PackageImport(node) => node.span,
             Self::ExportFunction(node) => node.span,
@@ -112,6 +116,18 @@ pub struct ImportFunctionDeclaration {
     pub span: Span,
 }
 
+/// Interface externa: layout declarado em Lift para um tipo Rust de outra crate.
+/// Os campos precisam existir no tipo Rust, ser públicos e ter exatamente os
+/// tipos mapeados pelo contrato de FFI.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImportInterfaceDeclaration {
+    pub name: Identifier,
+    pub fields: Vec<InterfaceField>,
+    pub source: String,
+    pub source_span: Span,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InterfaceDeclaration {
     pub name: Identifier,
@@ -122,6 +138,9 @@ pub struct InterfaceDeclaration {
 #[derive(Clone, Debug, PartialEq)]
 pub struct InterfaceField {
     pub name: Identifier,
+    /// Campo declarado com `?` após o nome (`name?: T`): pode ser omitido em
+    /// um object literal e vira `None`. PT-BR: campo opcional omitível.
+    pub optional: bool,
     pub ty: TypeExpression,
     pub span: Span,
 }
@@ -161,6 +180,8 @@ pub enum TypeExpressionKind {
     /// Builtin Result type; PT-BR: tipo Result embutido, sem generics gerais.
     Result(Box<TypeExpression>, Box<TypeExpression>),
     Optional(Box<TypeExpression>),
+    /// Tipo de função `(T, U) => R`, usado por callbacks e valores de função.
+    Function(Vec<TypeExpression>, Box<TypeExpression>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -175,7 +196,18 @@ pub enum Statement {
     Assignment(AssignmentStatement),
     If(IfStatement),
     While(WhileStatement),
+    /// `match valor { some(x) => {...} none => {...} }` para Option/Result.
+    Match(MatchStatement),
+    /// `for (const item of values) { ... }`; itera uma cópia owned do array.
+    ForOf(ForOfStatement),
+    Break(BreakStatement),
+    Continue(ContinueStatement),
     Return(ReturnStatement),
+    /// `throw expressão;`: produz `Err` para o `catch` mais próximo ou para o
+    /// retorno `Result<_, E>` da função.
+    Throw(ThrowStatement),
+    /// `try { ... } catch (erro: E) { ... }`.
+    TryCatch(TryCatchStatement),
     Expression(ExpressionStatement),
 }
 
@@ -186,10 +218,83 @@ impl Statement {
             Self::Assignment(node) => node.span,
             Self::If(node) => node.span,
             Self::While(node) => node.span,
+            Self::Match(node) => node.span,
+            Self::ForOf(node) => node.span,
+            Self::Break(node) => node.span,
+            Self::Continue(node) => node.span,
             Self::Return(node) => node.span,
+            Self::Throw(node) => node.span,
+            Self::TryCatch(node) => node.span,
             Self::Expression(node) => node.span,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThrowStatement {
+    pub value: Expression,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForOfStatement {
+    pub binding: BindingKind,
+    pub name: Identifier,
+    pub iterable: Expression,
+    pub body: Block,
+    pub span: Span,
+}
+
+/// `match` de Option/Result com braços exaustivos.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchStatement {
+    pub value: Expression,
+    pub arms: Vec<MatchArm>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchPattern {
+    pub kind: MatchPatternKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MatchPatternKind {
+    /// `some(nome)`.
+    Some(Identifier),
+    /// `none`.
+    None,
+    /// `ok(nome)` ou `ok()` quando o sucesso é `void`.
+    Ok(Option<Identifier>),
+    /// `err(nome)`.
+    Err(Identifier),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BreakStatement {
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContinueStatement {
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TryCatchStatement {
+    pub body: Block,
+    pub catch_name: Identifier,
+    pub catch_type: TypeExpression,
+    pub catch_body: Block,
+    pub span: Span,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,6 +368,9 @@ pub struct Expression {
 pub enum ExpressionKind {
     Closure(ClosureExpression),
     Template(Vec<Expression>),
+    /// Operador `?`: propaga `Err` para o `try` mais próximo ou para o retorno
+    /// `Result<_, E>` da função, produzindo o payload de sucesso.
+    TryPropagate(Box<Expression>),
     /// Magnitude não negativa. A semântica valida o intervalo `i64`, levando
     /// em conta um operador unário de negação que possa precedê-la.
     IntegerLiteral(u64),

@@ -12,6 +12,7 @@ pub(crate) fn uses_db_runtime(program: &HirProgram) -> bool {
         .iter()
         .any(|declaration| match declaration {
             HirDeclaration::Struct(s) => s.fields.iter().any(|f| f.ty.needs_db_runtime()),
+            HirDeclaration::ExternStruct(s) => s.fields.iter().any(|f| f.ty.needs_db_runtime()),
             HirDeclaration::Function(f) => {
                 f.return_type.needs_db_runtime()
                     || f.parameters.iter().any(|p| p.ty.needs_db_runtime())
@@ -28,6 +29,7 @@ pub(crate) fn uses_db_runtime(program: &HirProgram) -> bool {
 fn statement_uses_db(statement: &HirStatement) -> bool {
     match statement {
         HirStatement::Variable(v) => v.ty.needs_db_runtime() || expression_uses_db(&v.initializer),
+        HirStatement::Narrow(n) => n.ty.needs_db_runtime(),
         HirStatement::Assignment(a) => {
             expression_uses_db(&a.target) || expression_uses_db(&a.value)
         }
@@ -36,6 +38,24 @@ fn statement_uses_db(statement: &HirStatement) -> bool {
         HirStatement::If(i) => if_uses_db(i),
         HirStatement::While(w) => {
             expression_uses_db(&w.condition) || w.body.statements.iter().any(statement_uses_db)
+        }
+        HirStatement::ForOf(f) => {
+            f.element_ty.needs_db_runtime()
+                || expression_uses_db(&f.iterable)
+                || f.body.statements.iter().any(statement_uses_db)
+        }
+        HirStatement::Break(_) | HirStatement::Continue(_) => false,
+        HirStatement::Match(m) => {
+            expression_uses_db(&m.value)
+                || m.arms
+                    .iter()
+                    .any(|arm| arm.body.statements.iter().any(statement_uses_db))
+        }
+        HirStatement::Throw(t) => expression_uses_db(&t.value),
+        HirStatement::TryCatch(t) => {
+            t.catch_ty.needs_db_runtime()
+                || t.body.statements.iter().any(statement_uses_db)
+                || t.catch_body.statements.iter().any(statement_uses_db)
         }
     }
 }
@@ -73,9 +93,26 @@ fn expression_uses_db(expression: &HirExpr) -> bool {
         HirExprKind::ClosureCall { callee, arguments } => {
             expression_uses_db(callee) || arguments.iter().any(expression_uses_db)
         }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            expression_uses_db(array)
+                || expression_uses_db(callback)
+                || initial.as_deref().is_some_and(expression_uses_db)
+        }
+        HirExprKind::FunctionValue { .. } => false,
         HirExprKind::Call { arguments, .. } => {
             arguments.iter().any(|a| expression_uses_db(&a.expression))
         }
+        HirExprKind::ResultOk(Some(value)) => expression_uses_db(value),
+        HirExprKind::ResultOk(None) => false,
+        HirExprKind::ResultErr(value)
+        | HirExprKind::TryPropagate {
+            expression: value, ..
+        } => expression_uses_db(value),
         HirExprKind::StructLiteral { fields, .. } => {
             fields.iter().any(|f| expression_uses_db(&f.value))
         }
@@ -239,6 +276,9 @@ fn statement(s: &HirStatement, state: &mut State, errors: &mut Vec<SemaError>, d
                 expr(&a.target, state, errors, false, false);
             }
         }
+        HirStatement::Narrow(_) => {
+            // Opcionais não podem conter recursos opacos.
+        }
         HirStatement::Expression(e) => {
             expr(&e.expression, state, errors, false, direct);
         }
@@ -262,6 +302,54 @@ fn statement(s: &HirStatement, state: &mut State, errors: &mut Vec<SemaError>, d
                     "loop não pode consumir recurso externo; mova a operação para fora do loop",
                 );
             }
+        }
+        HirStatement::ForOf(f) => {
+            expr(&f.iterable, state, errors, false, false);
+            let before = state.clone();
+            let mut body = state.clone();
+            for s in &f.body.statements {
+                statement(s, &mut body, errors, false);
+            }
+            if before.iter().any(|(id, value)| body.get(id) != Some(value)) {
+                error(
+                    errors,
+                    f.span,
+                    "loop não pode consumir recurso externo; mova a operação para fora do loop",
+                );
+            }
+        }
+        HirStatement::Break(_) | HirStatement::Continue(_) => {}
+        HirStatement::Match(m) => {
+            expr(&m.value, state, errors, false, false);
+            let before = state.clone();
+            let mut branches = Vec::with_capacity(m.arms.len());
+            for arm in &m.arms {
+                let mut branch = before.clone();
+                for s in &arm.body.statements {
+                    statement(s, &mut branch, errors, false);
+                }
+                branches.push(branch);
+            }
+            for (id, available) in state.iter_mut() {
+                available.0 = branches
+                    .iter()
+                    .all(|branch| branch.get(id).is_some_and(|value| value.0));
+            }
+        }
+        HirStatement::Throw(t) => {
+            expr(&t.value, state, errors, true, false);
+        }
+        HirStatement::TryCatch(t) => {
+            // Conservador: o corpo é analisado primeiro e o catch parte do
+            // estado resultante, como se qualquer consumo já tivesse ocorrido.
+            for s in &t.body.statements {
+                statement(s, state, errors, direct);
+            }
+            let mut catch_state = state.clone();
+            for s in &t.catch_body.statements {
+                statement(s, &mut catch_state, errors, direct);
+            }
+            *state = catch_state;
         }
     }
 }
@@ -424,6 +512,28 @@ fn expr(e: &HirExpr, state: &mut State, errors: &mut Vec<SemaError>, consume: bo
                 expr(a, state, errors, false, false);
             }
         }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            expr(array, state, errors, false, false);
+            expr(callback, state, errors, false, false);
+            if let Some(initial) = initial {
+                expr(initial, state, errors, false, false);
+            }
+        }
+        HirExprKind::FunctionValue { .. } => {}
+        HirExprKind::ResultOk(Some(inner)) | HirExprKind::ResultErr(inner) => {
+            expr(inner, state, errors, false, false);
+        }
+        HirExprKind::ResultOk(None) => {}
+        HirExprKind::TryPropagate { expression, .. } => {
+            // O `Move` interno marca o recurso consumido; o sucesso de um
+            // Result com recurso vira um novo binding owned.
+            expr(expression, state, errors, false, false);
+        }
         _ => {}
     }
 }
@@ -444,6 +554,25 @@ fn accesses(
             }
         }
         HirExprKind::Move(inner) => accesses(inner, true, borrowed, moved),
+        HirExprKind::TryPropagate { expression, .. } => {
+            accesses(expression, consuming, borrowed, moved)
+        }
+        HirExprKind::ResultOk(Some(inner)) | HirExprKind::ResultErr(inner) => {
+            accesses(inner, consuming, borrowed, moved)
+        }
+        HirExprKind::ResultOk(None) => {}
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            accesses(array, consuming, borrowed, moved);
+            accesses(callback, consuming, borrowed, moved);
+            if let Some(initial) = initial {
+                accesses(initial, consuming, borrowed, moved);
+            }
+        }
         HirExprKind::Grouping(inner) => accesses(inner, consuming, borrowed, moved),
         HirExprKind::Clone { expression, .. } => accesses(expression, false, borrowed, moved),
         HirExprKind::Call { arguments, .. } => {

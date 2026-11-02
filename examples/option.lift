@@ -67,3 +67,54 @@ console.log(person.name ?? "unknown");
 console.log(null ?? 42);
 console.log(absent == null);
 console.log(null != present);
+
+// EN: `nickname?: string` may be omitted; omitted optional fields become None.
+// PT-BR: `nickname?: string` pode ser omitido; campos omitidos viram None.
+interface Account { name: string, nickname?: string }
+interface Tally { hits: int }
+
+function display(account: Account): string {
+    if account.nickname == null { return account.name; }
+    return account.name + " (" + (account.nickname ?? "") + ")";
+}
+
+// EN: Narrowing refines `T?` in branches and after returning guards.
+// PT-BR: Narrowing refina `T?` em ramos e após guardas que retornam.
+function greet(value: string?): string {
+    if value == null { return "anonymous"; }
+    return "hello, " + value;
+}
+
+function pick(first: int?, second: int?): int {
+    if first == null { return second ?? -1; }
+    if option.is_some(second) { return first + second; }
+    return first;
+}
+
+function sum_until(value: int?, limit: int): int {
+    let total = 0;
+    while option.is_some(value) && total < limit {
+        total = total + value;
+    }
+    return total;
+}
+
+function twice_if_present(value: int?): int {
+    if value == null { return 0; }
+    const twice = (): int => { return value * 2; };
+    return twice();
+}
+
+const partial: Account = { name: "Ada" };
+const filled: Account = { name: "Bob", nickname: option.some("Bobby") };
+console.log(display(partial));
+console.log(display(filled));
+console.log(display({ name: "Cy", nickname: null }));
+console.log(greet(null));
+console.log(greet(option.some("Lift")));
+console.log(pick(option.some(4), option.some(6)));
+console.log(pick(null, option.some(2)));
+console.log(pick(option.some(3), null));
+console.log(sum_until(option.some(2), 5));
+console.log(twice_if_present(option.some(7)));
+console.log(twice_if_present(null));

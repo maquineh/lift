@@ -33,6 +33,7 @@ enum Shape {
         else_branch: Option<ElsePoints>,
     },
     While(Vec<Point>),
+    ForOf(Vec<Point>),
 }
 
 enum ElsePoints {
@@ -174,12 +175,32 @@ impl Graph {
                 shape: Shape::While(body),
             };
         }
+        if let HirStatement::ForOf(loop_statement) = statement {
+            let node = self.expression_node(&loop_statement.iterable);
+            let mut complete = Node::default();
+            observe_statement(statement, &mut complete);
+            self.nodes[node].occurrences = complete.occurrences;
+            let (body_entry, body) =
+                self.sequence(loop_statement.body.statements.iter(), Some(node));
+            self.nodes[node].successors = body_entry.into_iter().chain(next).collect();
+            return Point {
+                node,
+                shape: Shape::ForOf(body),
+            };
+        }
         let mut node = Node::default();
         match statement {
             HirStatement::Variable(variable) => {
                 observe(&variable.initializer, &mut node);
                 node.defs.insert(variable.id);
                 self.owned.insert(variable.id);
+            }
+            HirStatement::Narrow(narrowing) => {
+                // A cópia do payload é obrigatória: o narrowing só existe
+                // porque o opcional é Some por contrato de fluxo.
+                node.uses.insert(narrowing.source);
+                node.defs.insert(narrowing.id);
+                self.owned.insert(narrowing.id);
             }
             HirStatement::Assignment(assignment) => {
                 observe(&assignment.value, &mut node);
@@ -196,11 +217,35 @@ impl Graph {
                     observe(value, &mut node);
                 }
             }
-            HirStatement::If(_) | HirStatement::While(_) => unreachable!(),
+            HirStatement::Throw(statement) => observe(&statement.value, &mut node),
+            HirStatement::TryCatch(statement) => {
+                // O bloco inteiro é um único ponto conservador: nenhum clone
+                // interno é convertido em move, mas todos os usos contam.
+                for statement in &statement.body.statements {
+                    observe_statement(statement, &mut node);
+                }
+                for statement in &statement.catch_body.statements {
+                    observe_statement(statement, &mut node);
+                }
+                node.defs.insert(statement.catch_id);
+            }
+            HirStatement::Match(statement) => {
+                observe(&statement.value, &mut node);
+                for arm in &statement.arms {
+                    for statement in &arm.body.statements {
+                        observe_statement(statement, &mut node);
+                    }
+                    if let Some(binding) = match_binding(&arm.pattern) {
+                        node.defs.insert(binding.id);
+                    }
+                }
+            }
+            HirStatement::Break(_) | HirStatement::Continue(_) => {}
+            HirStatement::If(_) | HirStatement::While(_) | HirStatement::ForOf(_) => unreachable!(),
         }
-        // EN: Return has no fallthrough edge, including syntactically later code.
-        // PT-BR: Return não tem sucessor, inclusive para código posterior na fonte.
-        if !matches!(statement, HirStatement::Return(_)) {
+        // EN: Return/Throw have no fallthrough edge, including syntactically later code.
+        // PT-BR: Return/Throw não têm sucessor, inclusive para código posterior na fonte.
+        if !matches!(statement, HirStatement::Return(_) | HirStatement::Throw(_)) {
             node.successors.extend(next);
         }
         let mut complete = Node::default();
@@ -258,6 +303,11 @@ fn observe_statement(statement: &HirStatement, node: &mut Node) {
             *node.occurrences.entry(variable.id).or_default() += 1;
             observe(&variable.initializer, node);
         }
+        HirStatement::Narrow(narrowing) => {
+            node.uses.insert(narrowing.source);
+            *node.occurrences.entry(narrowing.source).or_default() += 1;
+            *node.occurrences.entry(narrowing.id).or_default() += 1;
+        }
         HirStatement::Assignment(assignment) => {
             observe(&assignment.target, node);
             observe(&assignment.value, node);
@@ -274,6 +324,34 @@ fn observe_statement(statement: &HirStatement, node: &mut Node) {
             for statement in &statement.body.statements {
                 observe_statement(statement, node);
             }
+        }
+        HirStatement::ForOf(statement) => {
+            observe(&statement.iterable, node);
+            for statement in &statement.body.statements {
+                observe_statement(statement, node);
+            }
+        }
+        HirStatement::Break(_) | HirStatement::Continue(_) => {}
+        HirStatement::Throw(statement) => observe(&statement.value, node),
+        HirStatement::Match(statement) => {
+            observe(&statement.value, node);
+            for arm in &statement.arms {
+                for statement in &arm.body.statements {
+                    observe_statement(statement, node);
+                }
+                if let Some(binding) = match_binding(&arm.pattern) {
+                    *node.occurrences.entry(binding.id).or_default() += 1;
+                }
+            }
+        }
+        HirStatement::TryCatch(statement) => {
+            for statement in &statement.body.statements {
+                observe_statement(statement, node);
+            }
+            for statement in &statement.catch_body.statements {
+                observe_statement(statement, node);
+            }
+            *node.occurrences.entry(statement.catch_id).or_default() += 1;
         }
     }
 }
@@ -307,9 +385,29 @@ fn observe(expression: &HirExpr, node: &mut Node) {
                 observe(argument, node);
             }
         }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            observe(array, node);
+            observe(callback, node);
+            if let Some(initial) = initial {
+                observe(initial, node);
+            }
+        }
+        HirExprKind::FunctionValue { .. } => {}
 
         HirExprKind::OptionNone => {}
         HirExprKind::OptionSome(payload) => observe(payload, node),
+        HirExprKind::ResultOk(value) => {
+            if let Some(value) = value {
+                observe(value, node);
+            }
+        }
+        HirExprKind::ResultErr(value) => observe(value, node),
+        HirExprKind::TryPropagate { expression, .. } => observe(expression, node),
         // EN: Both paths are possible; keep the RHS live conservatively.
         // PT-BR: Ambos os caminhos são possíveis; RHS conta como uso conservador.
         HirExprKind::Coalesce {
@@ -433,6 +531,20 @@ fn rewrite_statement(
         rewrite_sequence(&mut loop_statement.body.statements, body, graph, reachable);
         return;
     }
+    if let HirStatement::ForOf(loop_statement) = statement {
+        let Shape::ForOf(body) = &point.shape else {
+            unreachable!()
+        };
+        if reachable.contains(&point.node) {
+            rewrite_expr(
+                &mut loop_statement.iterable,
+                &graph.nodes[point.node],
+                &graph.owned,
+            );
+        }
+        rewrite_sequence(&mut loop_statement.body.statements, body, graph, reachable);
+        return;
+    }
     if !reachable.contains(&point.node) {
         return;
     }
@@ -441,6 +553,8 @@ fn rewrite_statement(
         HirStatement::Variable(variable) => {
             rewrite_expr(&mut variable.initializer, node, &graph.owned)
         }
+        HirStatement::Narrow(_) => {}
+        HirStatement::Throw(_) | HirStatement::TryCatch(_) | HirStatement::Match(_) => {}
         HirStatement::Assignment(assignment) => {
             rewrite_expr(&mut assignment.value, node, &graph.owned)
         }
@@ -452,7 +566,18 @@ fn rewrite_statement(
                 rewrite_expr(value, node, &graph.owned);
             }
         }
-        HirStatement::If(_) | HirStatement::While(_) => unreachable!(),
+        HirStatement::Break(_) | HirStatement::Continue(_) => {}
+        HirStatement::If(_) | HirStatement::While(_) | HirStatement::ForOf(_) => unreachable!(),
+    }
+}
+
+fn match_binding(pattern: &crate::HirMatchPattern) -> Option<&crate::HirMatchBinding> {
+    match pattern {
+        crate::HirMatchPattern::Some(binding) | crate::HirMatchPattern::Err(binding) => {
+            Some(binding)
+        }
+        crate::HirMatchPattern::Ok(Some(binding)) => Some(binding),
+        crate::HirMatchPattern::None | crate::HirMatchPattern::Ok(None) => None,
     }
 }
 
@@ -481,6 +606,18 @@ fn rewrite_expr(expression: &mut HirExpr, node: &Node, owned: &HashSet<BindingId
         HirExprKind::ArrayLiteral(elements) => {
             for element in elements {
                 rewrite_expr(element, node, owned);
+            }
+        }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            rewrite_expr(array, node, owned);
+            rewrite_expr(callback, node, owned);
+            if let Some(initial) = initial {
+                rewrite_expr(initial, node, owned);
             }
         }
         HirExprKind::Unary { operand, .. } | HirExprKind::Grouping(operand) => {

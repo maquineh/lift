@@ -7,13 +7,14 @@
 //! validado. Consome decisões explícitas de tipos, ownership, clones e avaliação
 //! de argumentos da crate `lift_sema`, sem repetir a análise semântica.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use lift_ast::{BinaryOperator, UnaryOperator};
 use lift_sema::{
-    ArgPassMode, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode, HirBlock,
-    HirCallArgument, HirDeclaration, HirElseBranch, HirExpr, HirExprKind, HirFunction, HirIf,
-    HirImport, HirProgram, HirStatement, ParameterPassMode, ResolvedType, RustDependency,
+    ArgPassMode, ArrayMethodKind, BindingId, CallTempId, CloneMode, CoalesceMode, ExprDiscardMode,
+    HirBlock, HirCallArgument, HirDeclaration, HirElseBranch, HirExpr, HirExprKind,
+    HirExternStruct, HirFunction, HirIf, HirImport, HirMatchPattern, HirProgram, HirStatement,
+    LoopId, ParameterPassMode, PropagateTarget, ResolvedType, RustDependency, TryId,
     CONSOLE_LOG_BUILTIN, OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN,
     RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
 };
@@ -57,6 +58,14 @@ pub fn emit_cargo_manifest_for_program(
     for declaration in &program.declarations {
         match declaration {
             HirDeclaration::Import(import) => match &import.dependency {
+                RustDependency::LocalCore => needs_core = true,
+                RustDependency::LocalDb => needs_db = true,
+                RustDependency::LocalWeb => needs_web = true,
+                RustDependency::Registry { package, version } => {
+                    dependencies.insert(package, version);
+                }
+            },
+            HirDeclaration::ExternStruct(structure) => match &structure.dependency {
                 RustDependency::LocalCore => needs_core = true,
                 RustDependency::LocalDb => needs_db = true,
                 RustDependency::LocalWeb => needs_web = true,
@@ -112,13 +121,29 @@ fn toml_string(value: &str) -> String {
 fn statement_uses_console(statement: &HirStatement) -> bool {
     match statement {
         HirStatement::Variable(v) => expr_uses_console(&v.initializer),
+        HirStatement::Narrow(_) => false,
         HirStatement::Assignment(a) => expr_uses_console(&a.target) || expr_uses_console(&a.value),
         HirStatement::Expression(e) => expr_uses_console(&e.expression),
         HirStatement::Return(r) => r.value.as_ref().is_some_and(expr_uses_console),
         HirStatement::While(w) => {
             expr_uses_console(&w.condition) || w.body.statements.iter().any(statement_uses_console)
         }
+        HirStatement::ForOf(f) => {
+            expr_uses_console(&f.iterable) || f.body.statements.iter().any(statement_uses_console)
+        }
+        HirStatement::Break(_) | HirStatement::Continue(_) => false,
+        HirStatement::Match(m) => {
+            expr_uses_console(&m.value)
+                || m.arms
+                    .iter()
+                    .any(|arm| arm.body.statements.iter().any(statement_uses_console))
+        }
         HirStatement::If(i) => if_uses_console(i),
+        HirStatement::Throw(t) => expr_uses_console(&t.value),
+        HirStatement::TryCatch(t) => {
+            t.body.statements.iter().any(statement_uses_console)
+                || t.catch_body.statements.iter().any(statement_uses_console)
+        }
     }
 }
 
@@ -140,8 +165,25 @@ fn expr_uses_console(expression: &HirExpr) -> bool {
         HirExprKind::ClosureCall { callee, arguments } => {
             expr_uses_console(callee) || arguments.iter().any(expr_uses_console)
         }
+        HirExprKind::ArrayMethod {
+            array,
+            callback,
+            initial,
+            ..
+        } => {
+            expr_uses_console(array)
+                || expr_uses_console(callback)
+                || initial.as_deref().is_some_and(expr_uses_console)
+        }
+        HirExprKind::FunctionValue { .. } => false,
         HirExprKind::OptionNone => false,
         HirExprKind::OptionSome(payload) => expr_uses_console(payload),
+        HirExprKind::ResultOk(Some(value)) => expr_uses_console(value),
+        HirExprKind::ResultOk(None) => false,
+        HirExprKind::ResultErr(value)
+        | HirExprKind::TryPropagate {
+            expression: value, ..
+        } => expr_uses_console(value),
         HirExprKind::Coalesce {
             option, fallback, ..
         } => expr_uses_console(option) || expr_uses_console(fallback),
@@ -207,6 +249,8 @@ struct Emitter {
     indent: usize,
     function_names: HashMap<String, String>,
     struct_names: HashMap<String, String>,
+    /// Nomes Lift de tipos externos: campos usam o nome Rust, sem mangle.
+    extern_structs: HashSet<String>,
     parameter_modes: HashMap<BindingId, ParameterPassMode>,
     next_temp_name: u32,
 }
@@ -232,6 +276,17 @@ impl Emitter {
                     structure.name.clone(),
                     generated_name("__lift_type_", &structure.name),
                 )),
+                HirDeclaration::ExternStruct(structure) => {
+                    Some((structure.name.clone(), structure.rust_path.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let extern_structs = program
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                HirDeclaration::ExternStruct(structure) => Some(structure.name.clone()),
                 _ => None,
             })
             .collect();
@@ -243,6 +298,7 @@ impl Emitter {
             indent: 0,
             function_names,
             struct_names,
+            extern_structs,
             parameter_modes: HashMap::new(),
             next_temp_name: 0,
         }
@@ -267,6 +323,7 @@ impl Emitter {
                     self.line("}");
                     self.line("");
                 }
+                HirDeclaration::ExternStruct(structure) => self.emit_extern_struct(structure),
                 HirDeclaration::Function(function) => {
                     self.emit_function(function);
                     self.line("");
@@ -320,27 +377,63 @@ impl Emitter {
         self.line("}");
     }
 
+    /// Asserções que fazem o `rustc` verificar layout, visibilidade e traits.
+    /// PT-BR: asserções de layout, visibilidade e traits do tipo externo.
+    fn emit_extern_struct(&mut self, structure: &HirExternStruct) {
+        let path = &structure.rust_path;
+        let suffix = generated_name("", &structure.name);
+        self.line("#[allow(dead_code)]");
+        self.line(format!(
+            "fn __lift_extern_layout{suffix}(__lift_value: &{path}) {{"
+        ));
+        self.indent += 1;
+        for field in &structure.fields {
+            // Nome de campo Rust idêntico ao declarado, validado na semântica.
+            self.line(format!(
+                "let _: {} = ::std::clone::Clone::clone(&__lift_value.{});",
+                self.rust_type(&field.ty),
+                field.name
+            ));
+        }
+        self.indent -= 1;
+        self.line("}");
+        self.line("#[allow(dead_code)]");
+        self.line(format!("fn __lift_extern_traits{suffix}() {{"));
+        self.indent += 1;
+        self.line(
+            "fn __lift_assert<T: ::std::clone::Clone + ::std::fmt::Debug + ::std::cmp::PartialEq>() {}",
+        );
+        self.line(format!("__lift_assert::<{path}>();"));
+        self.indent -= 1;
+        self.line("}");
+        self.line("");
+    }
+
     fn emit_import(&mut self, import: &HirImport) {
-        let parameter_type = |(ty, mode): (&ResolvedType, &ParameterPassMode)| match ty {
-            ResolvedType::String => "&str".to_owned(),
-            ResolvedType::Array(element) => format!("&[{}]", self.rust_type(element)),
-            ResolvedType::Resource(_) => self.parameter_type(*mode, ty),
-            _ => self.rust_type(ty),
-        };
-        let types = import
+        let wrapper_types = import
             .parameters
             .iter()
             .zip(&import.parameter_modes)
-            .map(parameter_type)
+            .map(|(ty, mode)| self.wrapper_parameter_type(ty, *mode))
             .collect::<Vec<_>>();
-        let parameters = types
+        let ffi_types = import
+            .parameters
+            .iter()
+            .zip(&import.parameter_modes)
+            .map(|(ty, mode)| self.ffi_parameter_type(ty, *mode))
+            .collect::<Vec<_>>();
+        let parameters = wrapper_types
             .iter()
             .enumerate()
             .map(|(i, ty)| format!("__lift_arg_{i}: {ty}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let arguments = (0..types.len())
-            .map(|i| format!("__lift_arg_{i}"))
+        let arguments = import
+            .parameters
+            .iter()
+            .zip(&import.parameter_modes)
+            .enumerate()
+            .map(|(i, (ty, mode))| self.ffi_argument(i, ty, *mode))
             .collect::<Vec<_>>()
             .join(", ");
         let result = self.rust_type(&import.return_type);
@@ -351,14 +444,91 @@ impl Emitter {
         self.indent += 1;
         // The safe function-pointer type makes rustc verify the claimed Rust signature.
         self.line(format!(
-            "let __lift_ffi: fn({}) -> {result} = ::{};",
-            types.join(", "),
+            "let __lift_ffi: fn({}) -> {} = ::{};",
+            ffi_types.join(", "),
+            self.ffi_return_type(&import.return_type),
             import.rust_path
         ));
-        self.line(format!("__lift_ffi({arguments})"));
+        // Callback devolvido pela FFI chega como `Box<dyn Fn>` e vira `Rc`.
+        let call = format!("__lift_ffi({arguments})");
+        if matches!(import.return_type, ResolvedType::Closure(..)) {
+            self.line(format!("::std::rc::Rc::from({call})"));
+        } else {
+            self.line(call);
+        }
         self.indent -= 1;
         self.line("}");
         self.line("");
+    }
+
+    /// Tipo Rust de retorno declarado no ponteiro `fn` da FFI.
+    /// PT-BR: callback retornado usa `Box<dyn Fn>`; o wrapper converte para Rc.
+    fn ffi_return_type(&self, ty: &ResolvedType) -> String {
+        match ty {
+            ResolvedType::Closure(..) => {
+                format!("::std::boxed::Box<{}>", self.callback_type(ty))
+            }
+            _ => self.rust_type(ty),
+        }
+    }
+
+    /// Tipo do parâmetro do wrapper, seguindo o modo de passagem Lift.
+    /// PT-BR: tipo do parâmetro do wrapper conforme o modo Lift.
+    fn wrapper_parameter_type(&self, ty: &ResolvedType, mode: ParameterPassMode) -> String {
+        match ty {
+            ResolvedType::String => "&str".to_owned(),
+            ResolvedType::Array(element) => format!("&[{}]", self.rust_type(element)),
+            _ => self.parameter_type(mode, ty),
+        }
+    }
+
+    /// Tipo declarado para o ponteiro `fn` do destino Rust.
+    /// PT-BR: tipo declarado no ponteiro `fn` da função Rust.
+    fn ffi_parameter_type(&self, ty: &ResolvedType, mode: ParameterPassMode) -> String {
+        match ty {
+            ResolvedType::Resource(_) => self.parameter_type(mode, ty),
+            ResolvedType::String => "&str".to_owned(),
+            ResolvedType::Array(element) => format!("&[{}]", self.rust_type(element)),
+            ResolvedType::Struct(name) => format!("&{}", self.type_name(name)),
+            ResolvedType::Optional(payload) => {
+                format!("Option<{}>", self.ffi_parameter_type(payload, mode))
+            }
+            // Callback emprestado: `&dyn Fn` com tipos Rust owned.
+            ResolvedType::Closure(..) => format!("&{}", self.callback_type(ty)),
+            // Result é parâmetro emprestado, como os demais agregados.
+            ResolvedType::Result(..) => format!("&{}", self.rust_type(ty)),
+            _ => self.rust_type(ty),
+        }
+    }
+
+    /// Tipo Rust do callback: `dyn Fn(owned...) -> owned` (sem `Box`/`&`).
+    /// PT-BR: tipo do callback sem Box/empréstimo, para o ponteiro `fn` da FFI.
+    fn callback_type(&self, ty: &ResolvedType) -> String {
+        let ResolvedType::Closure(parameters, result) = ty else {
+            unreachable!("callback type must be a function type")
+        };
+        let parameters = parameters
+            .iter()
+            .map(|parameter| self.rust_type(parameter))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("dyn Fn({parameters}) -> {}", self.rust_type(result))
+    }
+
+    /// Converte o valor Lift do wrapper para o tipo declarado no ponteiro `fn`.
+    /// PT-BR: conversão entre a convenção Lift e a assinatura Rust declarada.
+    fn ffi_argument(&self, index: usize, ty: &ResolvedType, _mode: ParameterPassMode) -> String {
+        let name = format!("__lift_arg_{index}");
+        match ty {
+            ResolvedType::Optional(payload) => match &**payload {
+                ResolvedType::String | ResolvedType::Array(_) => format!("{name}.as_deref()"),
+                ResolvedType::Struct(_) => format!("{name}.as_ref()"),
+                _ => format!("*{name}"),
+            },
+            // `Rc<dyn Fn>` vira `&dyn Fn` para o ponteiro Rust declarado.
+            ResolvedType::Closure(..) => format!("&*{name}"),
+            _ => name,
+        }
     }
 
     fn emit_block_contents(&mut self, block: &HirBlock) {
@@ -386,14 +556,63 @@ impl Emitter {
                 let value = self.expression(&assignment.value);
                 self.line(format!("{target} = {value};"));
             }
+            HirStatement::Narrow(narrowing) => {
+                // O source pode ser um parâmetro emprestado; `&*source` obtém a
+                // referência compartilhada ao Option sem mover o valor.
+                let source = binding_name(narrowing.source);
+                let borrowed = self
+                    .parameter_modes
+                    .get(&narrowing.source)
+                    .is_some_and(|mode| {
+                        matches!(
+                            mode,
+                            ParameterPassMode::BorrowImm | ParameterPassMode::BorrowMut
+                        )
+                    });
+                let borrowed = if borrowed {
+                    format!("&*{source}")
+                } else {
+                    format!("&{source}")
+                };
+                self.line(format!(
+                    "let {} = ::std::clone::Clone::clone(::std::option::Option::as_ref({borrowed}).expect(\"narrowed optional value must be Some\"));",
+                    binding_name(narrowing.id)
+                ));
+            }
             HirStatement::If(statement) => self.emit_if(statement, "if "),
             HirStatement::While(statement) => {
                 let condition = self.expression(&statement.condition);
-                self.line(format!("while {condition} {{"));
+                self.line(format!(
+                    "{}: while {condition} {{",
+                    loop_label(statement.label)
+                ));
                 self.indent += 1;
                 self.emit_block_contents(&statement.body);
                 self.indent -= 1;
                 self.line("}");
+            }
+            HirStatement::ForOf(statement) => {
+                let iterable = self.expression(&statement.iterable);
+                let mutability = if statement.binding == lift_ast::BindingKind::Let {
+                    "mut "
+                } else {
+                    ""
+                };
+                self.line(format!(
+                    "{}: for {mutability}{} in {iterable} {{",
+                    loop_label(statement.label),
+                    binding_name(statement.id)
+                ));
+                self.indent += 1;
+                self.emit_block_contents(&statement.body);
+                self.indent -= 1;
+                self.line("}");
+            }
+            HirStatement::Break(statement) => {
+                self.line(format!("break {};", loop_label(statement.target)))
+            }
+            HirStatement::Continue(statement) => {
+                self.line(format!("continue {};", loop_label(statement.target)))
             }
             HirStatement::Return(statement) => match &statement.value {
                 Some(value) => {
@@ -402,6 +621,87 @@ impl Emitter {
                 }
                 None => self.line("return;"),
             },
+            HirStatement::Throw(statement) => {
+                let value = self.expression(&statement.value);
+                match statement.target {
+                    PropagateTarget::Function => {
+                        self.line(format!("return ::std::result::Result::Err({value});"));
+                    }
+                    PropagateTarget::Try(label) => {
+                        self.line(format!(
+                            "break '{} ::std::result::Result::Err({value});",
+                            try_label(label)
+                        ));
+                    }
+                }
+            }
+            HirStatement::Match(statement) => {
+                let value = self.expression(&statement.value);
+                self.line(format!("match {value} {{"));
+                self.indent += 1;
+                for arm in &statement.arms {
+                    let pattern = match &arm.pattern {
+                        HirMatchPattern::Some(binding) => {
+                            let mutability = if binding.requires_mut { "mut " } else { "" };
+                            format!("Some({mutability}{})", binding_name(binding.id))
+                        }
+                        HirMatchPattern::None => "None".to_owned(),
+                        HirMatchPattern::Ok(Some(binding)) => {
+                            let mutability = if binding.requires_mut { "mut " } else { "" };
+                            format!("Ok({mutability}{})", binding_name(binding.id))
+                        }
+                        HirMatchPattern::Ok(None) => "Ok(())".to_owned(),
+                        HirMatchPattern::Err(binding) => {
+                            let mutability = if binding.requires_mut { "mut " } else { "" };
+                            format!("Err({mutability}{})", binding_name(binding.id))
+                        }
+                    };
+                    self.line(format!("{pattern} => {{"));
+                    self.indent += 1;
+                    self.emit_block_contents(&arm.body);
+                    self.indent -= 1;
+                    self.line("},");
+                }
+                self.indent -= 1;
+                self.line("}");
+            }
+            HirStatement::TryCatch(statement) => {
+                let result_type = self.rust_type(&ResolvedType::Result(
+                    Box::new(ResolvedType::Void),
+                    Box::new(statement.catch_ty.clone()),
+                ));
+                let result = self.temp_name();
+                self.line(format!(
+                    "let {result}: {result_type} = '{}: {{",
+                    try_label(statement.label)
+                ));
+                self.indent += 1;
+                self.emit_block_contents(&statement.body);
+                self.line("::std::result::Result::Ok(())");
+                self.indent -= 1;
+                self.line("};");
+                self.line(format!("match {result} {{"));
+                self.indent += 1;
+                self.line("::std::result::Result::Ok(()) => {}");
+                let mutability = if statement.catch_mut { "mut " } else { "" };
+                self.line(format!(
+                    "::std::result::Result::Err({mutability}{}) => {{",
+                    binding_name(statement.catch_id)
+                ));
+                self.indent += 1;
+                self.emit_block_contents(&statement.catch_body);
+                self.indent -= 1;
+                self.line("}");
+                self.indent -= 1;
+                // `;` evita que o `match` vire expressão de cauda da função,
+                // que poderia exigir um tipo incompatível.
+                self.line("};");
+                if statement.returns {
+                    // Sem rotas de continuação: fecha o tipo de retorno com uma
+                    // divergência (as saídas reais usam `return`).
+                    self.line("unreachable!();");
+                }
+            }
             HirStatement::Expression(statement) => {
                 let expression = self.expression(&statement.expression);
                 match statement.discard_mode {
@@ -452,19 +752,162 @@ impl Emitter {
                 let previous = std::mem::take(&mut self.output);
                 self.emit_block_contents(body);
                 let body = std::mem::replace(&mut self.output, previous);
-                statements.push(format!("move |{parameters}| -> {} {{\n{body}\n}}", self.rust_type(result)));
+                let boxed_type = self.rust_type(&expression.ty);
+                statements.push(format!(
+                    "(::std::rc::Rc::new(move |{parameters}| -> {} {{\n{body}\n}}) as {boxed_type})",
+                    self.rust_type(result)
+                ));
                 format!("{{ {} }}", statements.join(" "))
+            }
+            HirExprKind::FunctionValue {
+                name,
+                parameters,
+                return_type,
+            } => {
+                let arguments = parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (ty, mode))| {
+                        let mutability = if *mode == ParameterPassMode::BorrowMut {
+                            "mut "
+                        } else {
+                            ""
+                        };
+                        format!(
+                            "{mutability}__lift_cb_{index}: {}",
+                            self.rust_type(ty)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let call_arguments = parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (_, mode))| match mode {
+                        ParameterPassMode::BorrowImm => format!("&__lift_cb_{index}"),
+                        ParameterPassMode::BorrowMut => format!("&mut __lift_cb_{index}"),
+                        ParameterPassMode::ByValue | ParameterPassMode::OwnedMove => {
+                            format!("__lift_cb_{index}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let boxed_type = self.rust_type(&expression.ty);
+                format!(
+                    "(::std::rc::Rc::new(move |{arguments}| -> {} {{ return {}({call_arguments}); }}) as {boxed_type})",
+                    self.rust_type(return_type),
+                    self.function_name(name)
+                )
             }
             HirExprKind::ClosureCall { callee, arguments } => {
                 let callee = self.expression(callee);
                 let arguments = arguments.iter().map(|a| self.expression(a)).collect::<Vec<_>>().join(", ");
                 format!("({callee})({arguments})")
             }
+            HirExprKind::ArrayMethod {
+                method,
+                array,
+                callback,
+                initial,
+            } => {
+                let values = self.temp_name();
+                let callee = self.temp_name();
+                let array = self.expression(array);
+                let callback = self.expression(callback);
+                match method {
+                    ArrayMethodKind::Map => {
+                        let ResolvedType::Array(element) = &expression.ty else {
+                            unreachable!("map must produce an array")
+                        };
+                        let element = self.rust_type(element);
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; {values}.into_iter().map(|__lift_item| ({callee})(__lift_item)).collect::<::std::vec::Vec<{element}>>() }}"
+                        )
+                    }
+                    ArrayMethodKind::Filter => {
+                        let ResolvedType::Array(element) = &expression.ty else {
+                            unreachable!("filter must produce an array")
+                        };
+                        let element = self.rust_type(element);
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; {values}.into_iter().filter(|__lift_item| ({callee})((*__lift_item).clone())).collect::<::std::vec::Vec<{element}>>() }}"
+                        )
+                    }
+                    ArrayMethodKind::Find => {
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; {values}.into_iter().find(|__lift_item| ({callee})((*__lift_item).clone())) }}"
+                        )
+                    }
+                    ArrayMethodKind::ForEach => {
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; for __lift_item in {values} {{ ({callee})(__lift_item); }} }}"
+                        )
+                    }
+                    ArrayMethodKind::Some => {
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; {values}.into_iter().any(|__lift_item| ({callee})(__lift_item)) }}"
+                        )
+                    }
+                    ArrayMethodKind::Every => {
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; {values}.into_iter().all(|__lift_item| ({callee})(__lift_item)) }}"
+                        )
+                    }
+                    ArrayMethodKind::Reduce => {
+                        let initial = initial
+                            .as_ref()
+                            .map(|initial| self.expression(initial))
+                            .unwrap_or_else(|| unreachable!("reduce must have an initial value"));
+                        format!(
+                            "{{ let {values} = {array}; let {callee} = {callback}; {values}.into_iter().fold({initial}, |__lift_acc, __lift_item| ({callee})(__lift_acc, __lift_item)) }}"
+                        )
+                    }
+                }
+            }
             HirExprKind::OptionNone => {
                 let ResolvedType::Optional(payload) = &expression.ty else { unreachable!("validated None must have an optional type") };
                 format!("::std::option::Option::<{}>::None", self.rust_type(payload))
             }
             HirExprKind::OptionSome(payload) => format!("::std::option::Option::Some({})", self.expression(payload)),
+            HirExprKind::ResultOk(value) => {
+                let ResolvedType::Result(ok, error) = &expression.ty else {
+                    unreachable!("validated Result::Ok must have a Result type")
+                };
+                let ok = self.rust_type(ok);
+                let error = self.rust_type(error);
+                match value {
+                    Some(value) => {
+                        let value = self.expression(value);
+                        format!("::std::result::Result::<{ok}, {error}>::Ok({value})")
+                    }
+                    None => format!("::std::result::Result::<{ok}, {error}>::Ok(())"),
+                }
+            }
+            HirExprKind::ResultErr(value) => {
+                let ResolvedType::Result(ok, error) = &expression.ty else {
+                    unreachable!("validated Result::Err must have a Result type")
+                };
+                let value = self.expression(value);
+                format!(
+                    "::std::result::Result::<{}, {}>::Err({value})",
+                    self.rust_type(ok),
+                    self.rust_type(error)
+                )
+            }
+            HirExprKind::TryPropagate { expression: inner, target } => {
+                let inner = self.expression(inner);
+                match target {
+                    PropagateTarget::Function => format!("({inner})?"),
+                    PropagateTarget::Try(label) => {
+                        let ok_value = self.temp_name();
+                        let error_value = self.temp_name();
+                        format!(
+                            "match ({inner}) {{ ::std::result::Result::Ok({ok_value}) => {ok_value}, ::std::result::Result::Err({error_value}) => break '{} ::std::result::Result::Err({error_value}) }}",
+                            try_label(*label)
+                        )
+                    }
+                }
+            }
             HirExprKind::Coalesce { option, fallback, mode } => {
                 let option = self.expression(option);
                 let fallback = self.expression(fallback);
@@ -490,12 +933,17 @@ impl Emitter {
                 struct_name,
                 fields,
             } => {
+                let external = self.extern_structs.contains(struct_name);
                 let fields = fields
                     .iter()
                     .map(|field| {
                         format!(
                             "{}: {}",
-                            field_name(&field.name),
+                            if external {
+                                field.name.clone()
+                            } else {
+                                field_name(&field.name)
+                            },
                             self.expression(&field.value)
                         )
                     })
@@ -547,7 +995,16 @@ impl Emitter {
                 }
             }
             HirExprKind::FieldAccess { object, field } => {
-                format!("({}).{}", self.expression(object), field_name(field))
+                let external = matches!(
+                    &object.ty,
+                    ResolvedType::Struct(name) if self.extern_structs.contains(name)
+                );
+                let name = if external {
+                    field.clone()
+                } else {
+                    field_name(field)
+                };
+                format!("({}).{}", self.expression(object), name)
             }
             HirExprKind::Call {
                 function,
@@ -787,7 +1244,17 @@ impl Emitter {
 
     fn rust_type(&self, ty: &ResolvedType) -> String {
         match ty {
-            ResolvedType::Closure(..) => unreachable!("closure types are inferred locally"),
+            ResolvedType::Closure(parameters, result) => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| self.rust_type(parameter))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "::std::rc::Rc<dyn Fn({parameters}) -> {}>",
+                    self.rust_type(result)
+                )
+            }
             ResolvedType::Int => "i64".to_owned(),
             ResolvedType::Number => "f64".to_owned(),
             ResolvedType::String => "String".to_owned(),
@@ -861,6 +1328,16 @@ fn generated_name(prefix: &str, source_name: &str) -> String {
 
 fn binding_name(id: BindingId) -> String {
     format!("__lift_binding_{}", id.0)
+}
+
+/// Nome do label Rust de um bloco `try` (sem o apóstrofo).
+fn try_label(id: TryId) -> String {
+    format!("lift_try_{}", id.0)
+}
+
+/// Label Rust de um laço, incluindo o apóstrofo.
+fn loop_label(id: LoopId) -> String {
+    format!("'lift_loop_{}", id.0)
 }
 
 fn field_name(source_name: &str) -> String {

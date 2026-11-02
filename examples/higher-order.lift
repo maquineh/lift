@@ -1,0 +1,49 @@
+// EN: Function types, stored/returned callbacks, captures, and FFI callbacks.
+// PT-BR: Tipos de função, callbacks armazenados/retornados, captures e callbacks FFI.
+import function apply_twice(value: int, callback: (int) => int): int from "lift_core::interop::apply_twice";
+import function apply_text(value: string, callback: (string) => string): string from "lift_core::interop::apply_text";
+import function add_constant(amount: int): (int) => int from "lift_core::interop::add_constant";
+import function trim(value: string): string from "lift_core::interop::string_trim";
+
+function double(value: int): int { return value * 2; }
+
+function show(value: int): void { console.log(value); }
+
+function make_adder(amount: int): (int) => int {
+    return (value: int): int => value + amount;
+}
+
+function apply(value: int, transform: (int) => int): int {
+    return transform(value) + transform(value);
+}
+
+// EN: A closure captures another callback by cloning its Rc.
+// PT-BR: Uma closure captura outro callback clonando seu Rc.
+function twice_apply(base: (int) => int): (int) => int {
+    return (value: int): int => base(base(value));
+}
+
+// EN: Function-typed parameter inside a function-typed parameter.
+// PT-BR: Parâmetro de função dentro de parâmetro de função.
+function call_higher(callback: ((int) => int) => int, seed: int): int {
+    return callback((value: int): int => value + seed);
+}
+
+const stored: (int) => int = double;
+const copy = stored;
+console.log(apply(3, double));
+console.log(apply(3, make_adder(10)));
+console.log(stored(5) + copy(6));
+console.log(apply_twice(2, double));
+const local = (value: int): int => value * 3;
+console.log(apply(4, local));
+console.log(apply_text("  lift  ", trim));
+const from_ffi = add_constant(100);
+console.log(from_ffi(5));
+const chained = make_adder(1);
+console.log(chained(41));
+const add_two = make_adder(2);
+console.log(twice_apply(add_two)(10));
+console.log(call_higher((inner: (int) => int): int => inner(5), 10));
+const printer: (int) => void = show;
+printer(9);

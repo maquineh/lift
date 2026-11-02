@@ -33,6 +33,28 @@ Adaptadores disponíveis:
 | `interop::array_contains_boolean` | `(boolean[], boolean) -> boolean` | Verifica pertinência de booleanos. |
 | `interop::array_contains_string` | `(string[], string) -> boolean` | Verifica pertinência exata de strings. |
 
+Adaptadores de struct, Option e Result exercitam o contrato FFI seguro estendido:
+
+| Caminho Rust | Assinatura Lift | Comportamento |
+| --- | --- | --- |
+| `interop::IntRange`, `interop::Label` | layouts `import interface` | Campos públicos, `Clone + Debug + PartialEq`, campo `note` opcional em `Label`. |
+| `interop::int_range` | `(int, int) -> IntRange` | Constrói um range owned. |
+| `interop::range_len` | `IntRange -> int` | Comprimento de um range emprestado. |
+| `interop::total_len` | `IntRange[] -> int` | Soma ranges emprestados. |
+| `interop::range_len_or` | `(IntRange?, int) -> int` | Range opcional emprestado com fallback. |
+| `interop::maybe_range` | `int -> IntRange?` | Retorna um range owned opcional. |
+| `interop::maybe_double` | `int? -> int?` | Dobra um inteiro opcional emprestado. |
+| `interop::maybe_trim` | `string? -> string?` | Remove whitespace de string opcional emprestada. |
+| `interop::maybe_parse` | `string -> Result<int?, string>` | Texto vazio é `Ok(None)`; inválido é `Err`. |
+| `interop::describe_range` | `Result<IntRange, string> -> string` | Result emprestado com payload de struct owned. |
+| `interop::describe_optional` | `Result<int?, string> -> string` | Result emprestado com payload opcional. |
+| `interop::maybe_total` | `IntRange[]? -> int` | Soma array emprestado opcional. |
+| `interop::try_range` | `int -> Result<IntRange, string>` | Payload de struct owned ou erro textual. |
+| `interop::label_text` | `Label -> string` | Lê um label emprestado e a nota opcional. |
+| `interop::apply_twice` | `(int, (int) => int) -> int` | Aplica um callback emprestado duas vezes. |
+| `interop::apply_text` | `(string, (string) => string) -> string` | Mapeia uma string owned por um callback emprestado. |
+| `interop::add_constant` | `int -> (int) => int` | Retorna um callback boxed que soma uma constante; o wrapper converte para `Rc`. |
+
 `array::is_empty`, `string::is_empty`, `string::contains` e `string::concat` também são compatíveis com FFI. A CLI embute essas fontes e as extrai no cache do projeto gerado. Seu executável pode ser movido sem manter o checkout. Rust/Cargo e um linker do host continuam necessários.
 
 ## Argumentos, stdin e arquivos
@@ -63,7 +85,7 @@ A API Rust é mais ampla que a superfície FFI acessível por Lift:
 - `array` oferece `len`, `is_empty`, `contains`, `map`, `filter` e `find` sobre slices emprestados.
 - `string` oferece `len`, `is_empty`, `contains`, `concat` e `trim`.
 - `io` oferece `arguments`, `read_stdin`, `read_file` e `write_file`, todos retornando `Result<_, String>`.
-- `map`, `filter` e `find` recebem callbacks `FnMut`. Closures locais com snapshot ainda não possuem tipo de função higher-order ou mapeamento FFI, então esses helpers continuam exclusivos do Rust.
+- `map`, `filter` e `find` recebem callbacks `FnMut`. Continuam exclusivos de Rust por serem genéricos; arrays Lift usam os métodos embutidos `map`/`filter`/`find` (veja `docs/array-methods.pt-BR.md`).
 
 `string::len` conta valores escalares Unicode; por exemplo, `"é🙂"` tem comprimento 2. Em Rust, `string::trim` retorna um `&str` emprestado. O adaptador FFI `interop::string_trim` retorna uma `String` owned para corresponder ao contrato atual de retorno de string em Lift.
 

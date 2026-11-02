@@ -1,0 +1,49 @@
+// EN: Exhaustive match for Option and Result.
+// PT-BR: match exaustivo para Option e Result.
+interface Point { value: int }
+
+function describe(value: int?): string {
+    match value {
+        some(present) => { return `some ${present}`; }
+        none => { return "none"; }
+    }
+}
+
+function risky(value: int): Result<int, string> {
+    if value < 0 { throw "negative"; }
+    return result.ok(value * 2);
+}
+
+function describe_result(value: int): string {
+    match risky(value) {
+        ok(ok_value) => { return `ok ${ok_value}`; }
+        err(error) => { return `err ${error}`; }
+    }
+}
+
+function make_void(): Result<void, string> { return result.ok(); }
+
+function describe_void(): string {
+    match make_void() {
+        ok() => { return "void ok"; }
+        err(error) => { return `err ${error}`; }
+    }
+}
+
+console.log(describe(option.some(3)));
+console.log(describe(null));
+console.log(describe_result(4));
+console.log(describe_result(-1));
+console.log(describe_void());
+const maybe_point: Point? = option.some({ value: 1 });
+match maybe_point {
+    some(point) => { point.value = 5; console.log(point.value); }
+    none => { console.log(0); }
+}
+console.log(option.unwrap(maybe_point).value);
+for (const value of [option.some(1), null, option.some(2)]) {
+    match value {
+        some(present) => { console.log(present); }
+        none => { break; }
+    }
+}

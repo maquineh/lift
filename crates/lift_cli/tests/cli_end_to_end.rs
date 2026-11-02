@@ -574,7 +574,7 @@ fn option_coalesce_is_lazy_exactly_once_and_preserves_optional_sources() {
     let directory = TempDir::new("option");
     let source = directory.path().join("option.lift");
     fs::write(&source, include_str!("../../../examples/option.lift")).unwrap();
-    let expected = "7\n1\n9\n12\n5\n112\ntrue\n5\n112\nfalse\n0\n\n112\nfalse\nkeep\nkeep\nkeep\nmissing\n1\n2\n3\nunknown\n42\ntrue\ntrue\n";
+    let expected = "7\n1\n9\n12\n5\n112\ntrue\n5\n112\nfalse\n0\n\n112\nfalse\nkeep\nkeep\nkeep\nmissing\n1\n2\n3\nunknown\n42\ntrue\ntrue\nAda\nBob (Bobby)\nCy\nanonymous\nhello, Lift\n10\n2\n3\n6\n14\n0\n";
     for command in ["check", "build", "run"] {
         let output = cli().arg(command).arg(&source).output().unwrap();
         assert_success(&output, &format!("Option {command}"));
@@ -612,6 +612,160 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
     let output = cli().arg("run").arg(source).output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("option.unwrap called on None"));
+}
+
+#[test]
+fn match_example_runs_option_result_and_void_arms() {
+    let directory = TempDir::new("match");
+    let source = directory.path().join("match.lift");
+    fs::write(&source, include_str!("../../../examples/match.lift")).unwrap();
+    let expected = "some 3\nnone\nok 8\nerr negative\nvoid ok\n5\n1\n1\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("match {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("match"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário match");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
+fn array_methods_example_runs_map_filter_find_reduce_and_effects() {
+    let directory = TempDir::new("array-methods");
+    let source = directory.path().join("array-methods.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/array-methods.lift"),
+    )
+    .unwrap();
+    let expected = "2\n8\n1\n2\n4\n3\ntrue\ntrue\n1\n2\n3\n4\n10\n#3\n20\n200\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("array-methods {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("array-methods"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário array-methods");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
+fn loops_example_runs_for_of_and_loop_control() {
+    let directory = TempDir::new("loops");
+    let source = directory.path().join("loops.lift");
+    fs::write(&source, include_str!("../../../examples/loops.lift")).unwrap();
+    let expected = "6\n1\n2\n3\n7\n8\n1\n3\n4\n5\n10\n20\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("loops {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("loops"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário loops");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
+fn higher_order_example_runs_callbacks_captures_and_ffi() {
+    let directory = TempDir::new("higher-order");
+    let source = directory.path().join("higher-order.lift");
+    fs::write(&source, include_str!("../../../examples/higher-order.lift")).unwrap();
+    let expected = "12\n26\n22\n8\n24\nlift\n105\n42\n14\n15\n9\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("higher-order {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("higher-order"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário higher-order");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
+fn errors_example_runs_constructors_propagation_throw_and_catch() {
+    let directory = TempDir::new("errors");
+    let source = directory.path().join("errors.lift");
+    fs::write(&source, include_str!("../../../examples/errors.lift")).unwrap();
+    let expected = "ok 42\nerror not an int: abc\nerror not positive\n1\nnot an int: bad\n-1\nnot an int: abc\n6\nnegative\nnot an int: abc!\ntrue\ntrue\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("errors {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("errors"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário errors");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
 }
 
 #[test]
@@ -1053,7 +1207,7 @@ fn interop_check_build_run_prints_through_local_core_and_keeps_borrowed_values()
     });
     let output = Command::new(binary).output().unwrap();
     assert_success(&output, "binário interop");
-    let expected = "Olá, Lift\nLift\n42\n2.5\ntrue\nfalse\nfalse\n1\nLift\nLift\n";
+    let expected = "Olá, Lift\nLift\n42\n2.5\ntrue\nfalse\nfalse\n1\nLift\nLift\n3\n8\n5\n4\n4\n-1\n42\n-1\nlift\nnone\ndemo\nsem nota\n9\n-1\n6\nnegative start\n14\nin\n5..6\nerror: negative start\n-1\nnot an int: abc\n42\nnone\nerror: not an int: oops\n";
     assert_eq!(
         String::from_utf8(output.stdout)
             .unwrap()

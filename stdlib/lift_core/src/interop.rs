@@ -87,6 +87,163 @@ pub fn array_contains_string(values: &[String], value: &str) -> bool {
     values.iter().any(|candidate| candidate == value)
 }
 
+/// FFI-visible struct: public fields with the exact Lift field mapping.
+///
+/// PT-BR: Struct visível ao FFI, com campos públicos e mapeamento exato Lift.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntRange {
+    pub start: i64,
+    pub end: i64,
+}
+
+/// FFI-visible struct with a required and an optional field.
+///
+/// PT-BR: Struct visível ao FFI com um campo obrigatório e um opcional.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Label {
+    pub text: String,
+    pub note: Option<String>,
+}
+
+/// Builds an [`IntRange`] by value; the returned struct is owned by the caller.
+///
+/// PT-BR: Constrói um [`IntRange`] por valor; a struct retornada pertence ao chamador.
+pub fn int_range(start: i64, end: i64) -> IntRange {
+    IntRange { start, end }
+}
+
+/// Reads a borrowed range and never consumes the caller's value.
+///
+/// PT-BR: Lê um range emprestado sem consumir o valor do chamador.
+pub fn range_len(range: &IntRange) -> i64 {
+    range.end.saturating_sub(range.start).max(0)
+}
+
+/// Sums borrowed ranges without consuming the array.
+///
+/// PT-BR: Soma ranges emprestados sem consumir o array.
+pub fn total_len(ranges: &[IntRange]) -> i64 {
+    ranges.iter().map(range_len).sum()
+}
+
+/// Reads an optional borrowed range, falling back when it is absent.
+///
+/// PT-BR: Lê um range opcional emprestado, usando o fallback na ausência.
+pub fn range_len_or(range: Option<&IntRange>, fallback: i64) -> i64 {
+    range.map(range_len).unwrap_or(fallback)
+}
+
+/// Returns an optional owned range.
+///
+/// PT-BR: Retorna um range opcional próprio.
+pub fn maybe_range(start: i64) -> Option<IntRange> {
+    (start >= 0).then(|| IntRange {
+        start,
+        end: start + 2,
+    })
+}
+
+/// Doubles an optional borrowed integer.
+///
+/// PT-BR: Dobra um inteiro opcional emprestado.
+pub fn maybe_double(value: Option<i64>) -> Option<i64> {
+    value.map(|value| value * 2)
+}
+
+/// Trims an optional borrowed string into an owned optional string.
+///
+/// PT-BR: Remove whitespace de uma string opcional emprestada.
+pub fn maybe_trim(value: Option<&str>) -> Option<String> {
+    value.map(|value| value.trim().to_owned())
+}
+
+/// Sums an optional borrowed array of ranges.
+///
+/// PT-BR: Soma um array opcional emprestado de ranges.
+pub fn maybe_total(ranges: Option<&[IntRange]>) -> i64 {
+    ranges.map(total_len).unwrap_or(-1)
+}
+
+/// Returns a range or a textual error, exercising `Result` with an owned struct.
+///
+/// PT-BR: Retorna um range ou erro textual, exercitando `Result` com struct própria.
+pub fn try_range(start: i64) -> Result<IntRange, String> {
+    if start >= 0 {
+        Ok(IntRange {
+            start,
+            end: start + 1,
+        })
+    } else {
+        Err("negative start".to_owned())
+    }
+}
+
+/// Describes a borrowed Result of a range, including its error text.
+///
+/// PT-BR: Descreve um Result emprestado de range, incluindo o texto de erro.
+pub fn describe_range(result: &Result<IntRange, String>) -> String {
+    match result {
+        Ok(range) => format!("{}..{}", range.start, range.end),
+        Err(error) => format!("error: {error}"),
+    }
+}
+
+/// Parses an integer into an optional Result payload; empty text means `Ok(None)`.
+///
+/// PT-BR: Converte texto em payload opcional de Result; vazio significa `Ok(None)`.
+pub fn maybe_parse(text: &str) -> Result<Option<i64>, String> {
+    if text.trim().is_empty() {
+        Ok(None)
+    } else {
+        text.trim()
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|_| format!("not an int: {text}"))
+    }
+}
+
+/// Describes a borrowed Result with an optional integer payload.
+///
+/// PT-BR: Descreve um Result emprestado com payload inteiro opcional.
+pub fn describe_optional(result: &Result<Option<i64>, String>) -> String {
+    match result {
+        Ok(Some(value)) => value.to_string(),
+        Ok(None) => "none".to_owned(),
+        Err(error) => format!("error: {error}"),
+    }
+}
+
+/// Reads a borrowed label, including its optional note.
+///
+/// PT-BR: Lê um label emprestado, incluindo a nota opcional.
+pub fn label_text(label: &Label) -> String {
+    match &label.note {
+        Some(note) => format!("{} ({note})", label.text),
+        None => label.text.clone(),
+    }
+}
+
+/// Applies a borrowed callback twice to an owned integer.
+///
+/// PT-BR: Aplica um callback emprestado duas vezes a um inteiro owned.
+pub fn apply_twice(value: i64, callback: &dyn Fn(i64) -> i64) -> i64 {
+    callback(callback(value))
+}
+
+/// Maps an owned string through a borrowed callback.
+///
+/// PT-BR: Mapeia uma string owned por um callback emprestado.
+pub fn apply_text(value: &str, callback: &dyn Fn(String) -> String) -> String {
+    callback(value.to_owned())
+}
+
+/// Returns a boxed callback that adds a constant.
+///
+/// PT-BR: Retorna um callback boxed que soma uma constante.
+pub fn add_constant(amount: i64) -> Box<dyn Fn(i64) -> i64> {
+    Box::new(move |value| value + amount)
+}
+
 fn length_as_int(length: usize) -> i64 {
     i64::try_from(length).expect("length exceeds the Lift int range")
 }
@@ -107,6 +264,19 @@ mod tests {
         let _: fn(&[f64], f64) -> bool = array_contains_number;
         let _: fn(&[bool], bool) -> bool = array_contains_boolean;
         let _: fn(&[String], &str) -> bool = array_contains_string;
+        let _: fn(i64, i64) -> IntRange = int_range;
+        let _: fn(&IntRange) -> i64 = range_len;
+        let _: fn(&[IntRange]) -> i64 = total_len;
+        let _: fn(Option<&IntRange>, i64) -> i64 = range_len_or;
+        let _: fn(i64) -> Option<IntRange> = maybe_range;
+        let _: fn(Option<i64>) -> Option<i64> = maybe_double;
+        let _: fn(Option<&str>) -> Option<String> = maybe_trim;
+        let _: fn(&Result<IntRange, String>) -> String = describe_range;
+        let _: fn(&str) -> Result<Option<i64>, String> = maybe_parse;
+        let _: fn(&Result<Option<i64>, String>) -> String = describe_optional;
+        let _: fn(i64, &dyn Fn(i64) -> i64) -> i64 = apply_twice;
+        let _: fn(&str, &dyn Fn(String) -> String) -> String = apply_text;
+        let _: fn(i64) -> Box<dyn Fn(i64) -> i64> = add_constant;
     }
 
     #[test]

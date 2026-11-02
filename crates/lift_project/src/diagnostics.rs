@@ -39,5 +39,8 @@ pub(crate) const fn semantic_code(kind: SemaErrorKind) -> &'static str {
         SemaErrorKind::BorrowConflict => "sema.BorrowConflict",
         SemaErrorKind::BorrowMutRequiresMutablePlace => "sema.BorrowMutRequiresMutablePlace",
         SemaErrorKind::UnsupportedOwnershipPattern => "sema.UnsupportedOwnershipPattern",
+        SemaErrorKind::InvalidPropagation => "sema.InvalidPropagation",
+        SemaErrorKind::InvalidLoopControl => "sema.InvalidLoopControl",
+        SemaErrorKind::InvalidMatch => "sema.InvalidMatch",
     }
 }

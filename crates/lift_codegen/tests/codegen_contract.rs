@@ -2,7 +2,7 @@
 //!
 //! PT-BR: Contratos do Rust gerado e manifesto para programas Lift validados.
 
-use lift_codegen::{emit_cargo_manifest, emit_rust};
+use lift_codegen::{emit_cargo_manifest, emit_cargo_manifest_for_program, emit_rust};
 use lift_lexer::tokenize;
 use lift_parser::parse;
 use lift_sema::{analyze, HirProgram};
@@ -86,6 +86,318 @@ fn emits_owned_option_snapshots_and_a_lazy_match_fallback() {
     assert!(rust.contains(".is_some()"));
     assert!(rust.contains("option.unwrap called on None"));
     assert!(!rust.contains("unwrap_or("));
+}
+
+#[test]
+fn emits_external_layout_assertions_and_option_struct_ffi_conversions() {
+    let hir = lower(
+        r#"
+        import interface P { x: int, tag?: string } from "sample@1.0.0::P";
+        import function make(x: int): P from "sample@1.0.0::make";
+        import function read(value: P?, text: string?, items: P[]?): string? from "sample@1.0.0::read";
+        const built: P = { x: 2 };
+        const p = make(1);
+        console.log(read(option.some(p), null, null) ?? "none");
+        console.log(built.x);
+    "#,
+    );
+    let rust = emit_rust(&hir);
+    assert!(rust.contains("fn __lift_extern_layout"), "{rust}");
+    assert!(rust.contains("__lift_value.x"), "{rust}");
+    assert!(rust.contains("__lift_value.tag"), "{rust}");
+    assert!(rust.contains("__lift_assert::<sample::P>();"), "{rust}");
+    assert!(
+        rust.contains(
+            "let __lift_ffi: fn(Option<&sample::P>, Option<&str>, Option<&[sample::P]>) -> ::std::option::Option<String>"
+        ),
+        "{rust}"
+    );
+    assert!(
+        rust.contains(
+            "__lift_ffi(__lift_arg_0.as_ref(), __lift_arg_1.as_deref(), __lift_arg_2.as_deref())"
+        ),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("sample::P { x: 2_i64, tag: ::std::option::Option::<String>::None }"),
+        "{rust}"
+    );
+    assert!(rust.contains("(__lift_binding_0).x"), "{rust}");
+    let manifest = emit_cargo_manifest_for_program("probe", &hir, "lift_core");
+    assert!(manifest.contains("sample = \"=1.0.0\""), "{manifest}");
+
+    let local =
+        lower(r#"import interface Range { start: int } from "lift_core::interop::IntRange";"#);
+    let manifest = emit_cargo_manifest_for_program("probe", &local, "lift_core");
+    assert!(
+        manifest.contains("lift_core = { path = \"lift_core\" }"),
+        "{manifest}"
+    );
+}
+
+#[test]
+fn emits_exhaustive_matches_for_option_and_result() {
+    let rust = emit_rust(&lower(
+        r#"
+        interface Point { value: int }
+        function describe(value: int?): string {
+            match value {
+                some(present) => { return `some ${present}`; }
+                none => { return "none"; }
+            }
+        }
+        function make(): Result<int, string> { return result.ok(1); }
+        function use(): int {
+            match make() {
+                ok(value) => { return value; }
+                err(error) => { return 0; }
+            }
+        }
+        function make_void(): Result<void, string> { return result.ok(); }
+        function use_void(): int {
+            match make_void() {
+                ok() => { return 1; }
+                err(error) => { return 0; }
+            }
+        }
+        const point: Point? = option.some({ value: 1 });
+        match point {
+            some(inner) => { inner.value = 2; }
+            none => {}
+        }
+        "#,
+    ));
+    assert!(rust.contains("match "), "{rust}");
+    assert!(rust.contains("Some("), "{rust}");
+    assert!(rust.contains("None => {"), "{rust}");
+    assert!(rust.contains("Ok("), "{rust}");
+    assert!(rust.contains("Err("), "{rust}");
+    assert!(rust.contains("Ok(()) => {"), "{rust}");
+    assert!(rust.contains("Some(mut __lift_binding_"), "{rust}");
+}
+
+#[test]
+fn emits_iterator_bridges_for_array_methods() {
+    let rust = emit_rust(&lower(
+        r#"
+        function sum(values: int[]): int {
+            return values.reduce(0, (accumulator: int, value: int): int => accumulator + value);
+        }
+        const values = [1, 2, 3];
+        const doubled = values.map((value: int): int => value * 2);
+        const labels = values.map((value: int): string => `#${value}`);
+        const evens = values.filter((value: int): boolean => value % 2 == 0);
+        const found = values.find((value: int): boolean => value > 1);
+        const any = values.some((value: int): boolean => value > 2);
+        const all = values.every((value: int): boolean => value > 0);
+        values.forEach((value: int): void => { console.log(value); });
+        console.log(sum(values));
+        "#,
+    ));
+    assert!(
+        rust.contains(".into_iter().map(|__lift_item| (")
+            && rust.contains(".collect::<::std::vec::Vec<i64>>()"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains(".collect::<::std::vec::Vec<String>>()"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains(".into_iter().filter(|__lift_item| ("),
+        "{rust}"
+    );
+    assert!(rust.contains(".into_iter().find(|__lift_item| ("), "{rust}");
+    assert!(rust.contains(".into_iter().any(|__lift_item| ("), "{rust}");
+    assert!(rust.contains(".into_iter().all(|__lift_item| ("), "{rust}");
+    assert!(rust.contains(".into_iter().fold("), "{rust}");
+    assert!(rust.contains("for __lift_item in"), "{rust}");
+}
+
+#[test]
+fn emits_labeled_loops_and_loop_control() {
+    let rust = emit_rust(&lower(
+        r#"
+        function scan(values: int[]): int {
+            let count = 0;
+            for (const value of values) {
+                if value == 2 { break; }
+                if value == 0 { continue; }
+                count = count + 1;
+            }
+            let index = 0;
+            while index < 3 {
+                index = index + 1;
+                if index == 2 { continue; }
+            }
+            return count;
+        }
+        "#,
+    ));
+    assert!(rust.contains("'lift_loop_0: for"), "{rust}");
+    assert!(rust.contains("break 'lift_loop_0;"), "{rust}");
+    assert!(rust.contains("continue 'lift_loop_0;"), "{rust}");
+    assert!(rust.contains("'lift_loop_1: while"), "{rust}");
+    assert!(rust.contains("continue 'lift_loop_1;"), "{rust}");
+    assert!(rust.contains(").clone()"), "{rust}");
+}
+
+#[test]
+fn emits_rc_callbacks_and_ffi_callback_bridges() {
+    let rust = emit_rust(&lower(
+        r#"
+        import function apply_twice(value: int, callback: (int) => int): int from "lift_core::interop::apply_twice";
+        import function add_constant(amount: int): (int) => int from "lift_core::interop::add_constant";
+        function double(value: int): int { return value * 2; }
+        function apply(value: int, transform: (int) => int): int { return transform(value); }
+        const stored: (int) => int = double;
+        console.log(apply(2, stored));
+        console.log(apply_twice(2, double));
+        const made = add_constant(3);
+        console.log(made(1));
+    "#,
+    ));
+    assert!(
+        rust.contains("__lift_binding_2: ::std::rc::Rc<dyn Fn(i64) -> i64>"),
+        "{rust}"
+    );
+    assert!(rust.contains("::std::rc::Rc::new(move |"), "{rust}");
+    assert!(
+        rust.contains("as ::std::rc::Rc<dyn Fn(i64) -> i64>"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("fn(i64, &dyn Fn(i64) -> i64) -> i64"),
+        "{rust}"
+    );
+    assert!(rust.contains("&*__lift_arg_1"), "{rust}");
+    assert!(
+        rust.contains("fn(i64) -> ::std::boxed::Box<dyn Fn(i64) -> i64>"),
+        "{rust}"
+    );
+    assert!(rust.contains("::std::rc::Rc::from("), "{rust}");
+    assert!(
+        rust.contains("move |__lift_cb_0: i64| -> i64 { return __lift_fn_"),
+        "{rust}"
+    );
+}
+
+#[test]
+fn emits_result_constructors_propagation_and_try_catch() {
+    let rust = emit_rust(&lower(
+        r#"
+        function source(value: int): Result<int, string> {
+            return result.ok(value);
+        }
+        function parse(value: int): Result<int, string> {
+            const parsed = source(value)?;
+            return result.ok(parsed + 1);
+        }
+        function fallback(value: int): int {
+            try {
+                const parsed = source(value)?;
+                return parsed;
+            } catch (error: string) {
+                console.log(error);
+                return -1;
+            }
+        }
+        const failed: Result<int, string> = result.err("no");
+        console.log(result.is_ok(failed));
+    "#,
+    ));
+    assert!(
+        rust.contains("::std::result::Result::<i64, String>::Ok("),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("::std::result::Result::<i64, String>::Err("),
+        "{rust}"
+    );
+    assert!(rust.contains(")?;"), "{rust}");
+    assert!(rust.contains("'lift_try_0: {"), "{rust}");
+    assert!(
+        rust.contains("break 'lift_try_0 ::std::result::Result::Err("),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("::std::result::Result::Err(__lift_binding_"),
+        "{rust}"
+    );
+    assert!(rust.contains("unreachable!();"), "{rust}");
+}
+
+#[test]
+fn emits_borrowed_result_parameters_and_option_payload_nesting() {
+    let rust = emit_rust(&lower(
+        r#"
+        import function start(): Result<int?, string> from "sample@1.0.0::start";
+        import function inspect(result: Result<int?, string>): Result<int?, string> from "sample@1.0.0::inspect";
+        const first = start();
+        const second = inspect(first);
+        console.log(result.is_ok(second));
+    "#,
+    ));
+    assert!(
+        rust.contains(
+            "fn __lift_fn_696e7370656374(__lift_arg_0: &::std::result::Result<::std::option::Option<i64>, String>)"
+        ),
+        "{rust}"
+    );
+    assert!(
+        rust.contains(
+            "let __lift_ffi: fn(&::std::result::Result<::std::option::Option<i64>, String>) -> ::std::result::Result<::std::option::Option<i64>, String>"
+        ),
+        "{rust}"
+    );
+    assert!(rust.contains("__lift_ffi(__lift_arg_0)"), "{rust}");
+    assert!(
+        rust.contains("__lift_fn_696e7370656374(&(__lift_binding_0))"),
+        "{rust}"
+    );
+}
+
+#[test]
+fn emits_optional_struct_fields_and_narrowed_payload_reads() {
+    let rust = emit_rust(&lower(
+        r#"
+        interface Profile { name: string, nickname?: string }
+        function label(value: string?): string {
+            if value == null { return "none"; }
+            return value;
+        }
+        function show(value: string?): void {
+            if value == null { return; }
+            console.log(value);
+        }
+        const profile: Profile = { name: "Ada" };
+        console.log(profile.nickname ?? label(null));
+        show(null);
+    "#,
+    ));
+    assert!(
+        rust.contains("__lift_field_6e69636b6e616d65: ::std::option::Option<String>"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("__lift_field_6e69636b6e616d65: ::std::option::Option::<String>::None"),
+        "{rust}"
+    );
+    // Parâmetro owned: o narrowing lê o Option por referência compartilhada.
+    assert!(
+        rust.contains("::std::option::Option::as_ref(&__lift_binding_"),
+        "{rust}"
+    );
+    // Parâmetro emprestado na assinatura Rust (`&Option<String>`).
+    assert!(
+        rust.contains("::std::option::Option::as_ref(&*__lift_binding_"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("narrowed optional value must be Some"),
+        "{rust}"
+    );
+    assert!(rust.contains("Console::log(&(__lift_binding_"), "{rust}");
 }
 
 #[test]

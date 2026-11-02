@@ -1,0 +1,31 @@
+// EN: Higher-order array methods with callbacks.
+// PT-BR: Métodos higher-order de array com callbacks.
+interface Point { value: int }
+
+function double(value: int): int { return value * 2; }
+
+function sum_all(values: int[]): int {
+    return values.reduce(0, (accumulator: int, value: int): int => accumulator + value);
+}
+
+const values = [1, 2, 3, 4];
+const doubled = values.map(double);
+console.log(doubled[0]);
+console.log(doubled[3]);
+console.log(values[0]);
+const evens = values.filter((value: int): boolean => value % 2 == 0);
+console.log(evens[0]);
+console.log(evens[1]);
+console.log(values.find((value: int): boolean => value > 2) ?? -1);
+console.log(values.some((value: int): boolean => value > 3));
+console.log(values.every((value: int): boolean => value > 0));
+values.forEach((value: int): void => { console.log(value); });
+console.log(sum_all(values));
+const labels = values.map((value: int): string => `#${value}`);
+console.log(labels[2]);
+const points = values.map((value: int): Point => { return { value: value * 10 }; });
+console.log(points[1].value);
+const chained = values
+    .filter((value: int): boolean => value > 1)
+    .map((value: int): int => value * 100);
+console.log(chained[0]);

@@ -60,23 +60,28 @@ can be mutated, using the normal prohibition on parameter rebinding.
 
 Free local names are resolved lexically at construction. Captures are independent
 owned **snapshots**, copied for primitives and explicitly cloned for strings,
-structs, arrays, Option and Result. This intentionally differs from TypeScript's
-live captured bindings. Later changes to outer bindings/projections are not
-visible. Captures cannot be reassigned or mutated, including through a mutating
-method/function. `this` inside an arrow is a snapshot of the enclosing receiver.
-Global named functions remain directly callable; functions themselves cannot be
-captured as values. Capturing another closure, recursion through the local
-closure name, reassignment/copying of closure bindings, closure fields/arrays,
-returning closures, callback parameters, function type annotations, and FFI
-closures are rejected. Standard-library map/filter/find callback adapters remain
-Rust-only. Nested closures are supported when they only capture ordinary values.
+structs, arrays, Option, Result, and function values (which clone their `Rc`).
+This intentionally differs from TypeScript's live captured bindings. Later changes
+to outer bindings/projections are not visible. Captures cannot be reassigned or
+mutated, including through a mutating method/function. `this` inside an arrow is a
+snapshot of the enclosing receiver. Global named functions remain directly
+callable; a function name used in a value position becomes a callback wrapper.
+Capturing another closure is supported by cloning its `Rc`, and closures can be
+reassigned/copied, stored/returned, and received as function-typed parameters;
+function types in annotations and FFI callbacks are covered by
+[function types and callbacks](higher-order.md). Recursion through the local
+closure name and closures in fields/arrays/Option/Result remain rejected.
+Standard-library map/filter/find callback adapters remain Rust-only. Nested
+closures are supported when they only capture ordinary values or callbacks.
 
 The HIR records the callable signature, typed body, parameter IDs, and each
 capture's fresh binding ID plus explicit owned initializer/CloneMode. Rust emits
-a `move` closure. Ownership checking ensures the body does not consume captures,
-so repeated calls are valid. Liveness observes capture initializers at creation
-and never visits the deferred body in the outer CFG; the body keeps conservative
-clones instead of borrowing the outer frame or applying outer last-use moves.
+an `Rc<dyn Fn>` value wrapping a `move` closure. Ownership checking ensures the
+body does not consume captures, so repeated calls are valid. Liveness observes
+capture initializers at creation and never visits the deferred body in the outer
+CFG; the body keeps conservative clones instead of borrowing the outer frame or
+applying outer last-use moves. Function types/callbacks, including copies and FFI
+callbacks, follow [their contract](higher-order.md).
 
 ## Template strings
 
