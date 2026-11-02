@@ -3692,6 +3692,15 @@ impl<'a> BodyChecker<'a> {
             }
         }
 
+        for (name, ty, _) in &snapshots {
+            if block_mutates_name(&closure.body, name) && !ty.is_copy() {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnsupportedOwnershipPattern,
+                    "capture mutável de closure exige um tipo Copy nesta fase",
+                    span,
+                ));
+            }
+        }
         let signature = FunctionInfo {
             name: "$closure".into(),
             type_parameters: Vec::new(),

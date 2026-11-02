@@ -22,7 +22,7 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 11. **Recursão e enums em interfaces** — payloads recursivos com `Box` automático, enums mutuamente recursivos, ciclos struct↔enum e campos de enum em interfaces.
 12. **Uniões nominais `type A = B | C`** — membros nominais desaçucarados para um enum, construção por `Shape.Circle(...)`, match exaustivo, membros enum e recursão.
 13. **Funções genéricas** — `function f<T>(...)` com inferência por argumento, `T[]`/`T?`/`Result<T, E>`, chamadas genéricas aninhadas e bounds Rust `Clone + Debug + PartialEq`.
-14. **Captures mutáveis/FnMut** — closures mutam captures via `Rc<RefCell<T>>`, com estado persistente e independente por closure; mutações ficam no snapshot interno.
+14. **Captures mutáveis/FnMut** — closures mutam captures `Copy` via `Rc<RefCell<T>>`, com estado persistente e independente por closure; mutações ficam no snapshot interno e captures não-Copy mutáveis são rejeitadas.
 
 ## Contratos e limites atuais
 
@@ -44,7 +44,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 ```
 
 - Formatação: limpa.
-- Testes: **180 passando**, **20 suítes**, 0 falhas.
+- Testes: **243 passando**, **39 suítes**, 0 falhas.
 - E2E por `check`, `build`, `run` e binário nativo dos exemplos:
   - `examples/loops.lift` → `6 1 2 3 7 8 1 3 4 5 10 20`
   - `examples/array-methods.lift` → `2 8 1 2 4 3 true true 1 2 3 4 10 #3 20 200`

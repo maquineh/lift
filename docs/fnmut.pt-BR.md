@@ -27,6 +27,6 @@ console.log(other());   // 1
 - Closures diferentes sobre a mesma variável recebem snapshots independentes; dois contadores são independentes.
 - A closure continua implementando `Fn`; a mutação usa mutabilidade interior (`Rc<RefCell<T>>`), então métodos de array/callbacks não mudam de assinatura.
 - Closures aninhadas capturam um snapshot de leitura da capture mutável externa; compartilhar a mesma célula entre closures aninhadas não é suportado.
-- Captures de recursos continuam rejeitadas; parâmetros de closure já são mutáveis quando o corpo atribui.
+- Captures mutáveis exigem snapshot `Copy` (primitivos); mutar structs/strings/arrays capturados e chamar métodos mutáveis em captures é rejeitado. Captures de recursos continuam rejeitadas; parâmetros de closure já são mutáveis quando o corpo atribui.
 
 Testes: `crates/lift_sema/tests/enum_contract.rs` (marcador de mutação), E2E `examples/fnmut.lift`; contratos de higher-order/array-methods cobrem captures imutáveis.
