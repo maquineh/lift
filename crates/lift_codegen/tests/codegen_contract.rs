@@ -163,6 +163,25 @@ fn emits_enums_and_qualified_match_patterns() {
 }
 
 #[test]
+fn emits_generic_functions_with_trait_bounds() {
+    let rust = emit_rust(&lower(
+        r#"
+        function identity<T>(value: T): T { return value; }
+        console.log(identity(1));
+        "#,
+    ));
+    assert!(
+        rust.contains("fn __lift_fn_") && rust.contains("<__lift_tp_T:"),
+        "{rust}"
+    );
+    assert!(rust.contains("::std::clone::Clone"), "{rust}");
+    assert!(rust.contains("::std::fmt::Debug"), "{rust}");
+    assert!(rust.contains("::std::cmp::PartialEq"), "{rust}");
+    assert!(rust.contains(": __lift_tp_T"), "{rust}");
+    assert!(rust.contains("__lift_fn_6964656e74697479(1_i64)"), "{rust}");
+}
+
+#[test]
 fn emits_named_enum_variants_with_object_payloads() {
     let rust = emit_rust(&lower(
         r#"

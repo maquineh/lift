@@ -242,6 +242,7 @@ pub(super) struct ParameterInfo {
 #[derive(Clone)]
 pub(super) struct FunctionInfo {
     pub(super) name: String,
+    pub(super) type_parameters: Vec<String>,
     pub(super) parameters: Vec<ParameterInfo>,
     pub(super) return_type: ResolvedType,
     pub(super) has_explicit_return_type: bool,
@@ -388,8 +389,10 @@ impl<'ast> Analyzer<'ast> {
 
         let mut statements_by_declaration = HashMap::<usize, HirStatement>::new();
         let mut top_level_errors = Vec::new();
+        let empty_type_parameters = HashSet::new();
         {
             let mut top_level = BodyChecker::new(
+                &empty_type_parameters,
                 &self.structures,
                 &self.enums,
                 &self.functions,
@@ -633,7 +636,7 @@ impl<'ast> Analyzer<'ast> {
                 }
                 let mut fields = Vec::new();
                 for field in &variant.fields {
-                    match resolve_type(field, names, TypePosition::Field) {
+                    match resolve_type(field, names, &HashSet::new(), TypePosition::Field) {
                         Ok(ty) => {
                             if ty.needs_db_runtime() {
                                 self.errors.push(SemaError::new(
@@ -679,7 +682,7 @@ impl<'ast> Analyzer<'ast> {
                         valid = false;
                         continue;
                     }
-                    match resolve_type(&field.ty, names, TypePosition::Field) {
+                    match resolve_type(&field.ty, names, &HashSet::new(), TypePosition::Field) {
                         Ok(ty) => {
                             if ty.needs_db_runtime() {
                                 self.errors.push(SemaError::new(
@@ -785,7 +788,7 @@ impl<'ast> Analyzer<'ast> {
                     valid = false;
                     continue;
                 };
-                let ty = match resolve_type(member, names, TypePosition::Field) {
+                let ty = match resolve_type(member, names, &HashSet::new(), TypePosition::Field) {
                     Ok(ty) => ty,
                     Err(error) => {
                         self.errors.push(error);
@@ -896,7 +899,7 @@ impl<'ast> Analyzer<'ast> {
                 valid = false;
                 continue;
             }
-            match resolve_type(&field.ty, names, TypePosition::Field) {
+            match resolve_type(&field.ty, names, &HashSet::new(), TypePosition::Field) {
                 Ok(ty) => {
                     if external {
                         if let Err(error) =
@@ -1053,9 +1056,23 @@ impl<'ast> Analyzer<'ast> {
             let Declaration::Function(function) = declaration else {
                 continue;
             };
+            let mut type_parameters = Vec::new();
+            let mut type_parameter_names = HashSet::new();
+            let mut valid = true;
+            for parameter in &function.type_parameters {
+                if !type_parameter_names.insert(parameter.name.clone()) {
+                    self.errors.push(SemaError::new(
+                        SemaErrorKind::DuplicateParameter,
+                        format!("parâmetro de tipo duplicado `{}`", parameter.name),
+                        parameter.span,
+                    ));
+                    valid = false;
+                } else {
+                    type_parameters.push(parameter.name.clone());
+                }
+            }
             let mut parameters = Vec::new();
             let mut seen = HashMap::<String, Span>::new();
-            let mut valid = true;
             for parameter in &function.parameters {
                 if let Some(previous) =
                     seen.insert(parameter.name.name.clone(), parameter.name.span)
@@ -1071,7 +1088,12 @@ impl<'ast> Analyzer<'ast> {
                     valid = false;
                     continue;
                 }
-                match resolve_type(&parameter.ty, &struct_names, TypePosition::Parameter) {
+                match resolve_type(
+                    &parameter.ty,
+                    &struct_names,
+                    &type_parameter_names,
+                    TypePosition::Parameter,
+                ) {
                     Ok(ty) => parameters.push(ParameterInfo {
                         name: parameter.name.name.clone(),
                         ty,
@@ -1088,7 +1110,12 @@ impl<'ast> Analyzer<'ast> {
 
             let has_explicit_return_type = function.return_type.is_some();
             let return_type = match &function.return_type {
-                Some(ty) => match resolve_type(ty, &struct_names, TypePosition::Return) {
+                Some(ty) => match resolve_type(
+                    ty,
+                    &struct_names,
+                    &type_parameter_names,
+                    TypePosition::Return,
+                ) {
                     Ok(ty) => ty,
                     Err(error) => {
                         self.errors.push(error);
@@ -1099,9 +1126,25 @@ impl<'ast> Analyzer<'ast> {
                 None => ResolvedType::Void,
             };
 
+            for parameter in &type_parameters {
+                let appears_in_input = parameters
+                    .iter()
+                    .any(|signature| type_contains_param(&signature.ty, parameter));
+                if !appears_in_input {
+                    self.errors.push(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        format!(
+                            "parâmetro de tipo `{parameter}` precisa aparecer em um parâmetro da função"
+                        ),
+                        function.name.span,
+                    ));
+                    valid = false;
+                }
+            }
             if valid {
                 let info = FunctionInfo {
                     name: function.name.name.clone(),
+                    type_parameters,
                     parameters,
                     return_type,
                     has_explicit_return_type,
@@ -1166,7 +1209,12 @@ impl<'ast> Analyzer<'ast> {
                         )
                         .with_secondary(previous));
                     }
-                    let ty = resolve_type(&parameter.ty, &names, TypePosition::Parameter)?;
+                    let ty = resolve_type(
+                        &parameter.ty,
+                        &names,
+                        &HashSet::new(),
+                        TypePosition::Parameter,
+                    )?;
                     if resource_signature.is_none() {
                         crate::interop::validate_type(
                             &ty,
@@ -1192,7 +1240,12 @@ impl<'ast> Analyzer<'ast> {
                         mutated: false,
                     });
                 }
-                let return_type = resolve_type(&import.return_type, &names, TypePosition::Return)?;
+                let return_type = resolve_type(
+                    &import.return_type,
+                    &names,
+                    &HashSet::new(),
+                    TypePosition::Return,
+                )?;
                 if let Some((expected, output)) = &resource_signature {
                     if expected
                         .iter()
@@ -1246,6 +1299,7 @@ impl<'ast> Analyzer<'ast> {
                 };
                 let signature = FunctionInfo {
                     name: import.name.name.clone(),
+                    type_parameters: Vec::new(),
                     parameters,
                     return_type,
                     has_explicit_return_type: true,
@@ -1366,7 +1420,13 @@ impl<'ast> Analyzer<'ast> {
         declaration: &FunctionDeclaration,
         signature: FunctionInfo,
     ) -> Result<HirFunction, SemaError> {
+        let type_parameter_set = signature
+            .type_parameters
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
         let mut checker = BodyChecker::new(
+            &type_parameter_set,
             &self.structures,
             &self.enums,
             &self.functions,
@@ -1422,6 +1482,7 @@ impl<'ast> Analyzer<'ast> {
 
         Ok(HirFunction {
             name: signature.name,
+            type_parameters: signature.type_parameters,
             parameters,
             return_type: signature.return_type,
             body,
@@ -1444,6 +1505,7 @@ struct TryContext {
 }
 
 struct BodyChecker<'a> {
+    type_parameters: &'a HashSet<String>,
     structures: &'a HashMap<String, StructInfo>,
     enums: &'a HashMap<String, EnumInfo>,
     functions: &'a HashMap<String, FunctionInfo>,
@@ -1459,6 +1521,7 @@ struct BodyChecker<'a> {
 
 impl<'a> BodyChecker<'a> {
     fn new(
+        type_parameters: &'a HashSet<String>,
         structures: &'a HashMap<String, StructInfo>,
         enums: &'a HashMap<String, EnumInfo>,
         functions: &'a HashMap<String, FunctionInfo>,
@@ -1469,6 +1532,7 @@ impl<'a> BodyChecker<'a> {
         function: Option<FunctionContext>,
     ) -> Self {
         Self {
+            type_parameters,
             structures,
             enums,
             functions,
@@ -2319,7 +2383,7 @@ impl<'a> BodyChecker<'a> {
             .chain(self.enums.keys().cloned())
             .chain(["int", "number", "string", "boolean", "void"].map(str::to_owned))
             .collect::<HashSet<_>>();
-        resolve_type(ty, &names, position)
+        resolve_type(ty, &names, self.type_parameters, position)
     }
 
     fn check_expr(
@@ -3556,6 +3620,13 @@ impl<'a> BodyChecker<'a> {
         function: &FunctionInfo,
         span: Span,
     ) -> Result<HirExpr, SemaError> {
+        if !function.type_parameters.is_empty() {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "função genérica não pode ser usada como valor; chame-a diretamente",
+                span,
+            ));
+        }
         if function.return_type.contains_resource()
             || function
                 .parameters
@@ -3631,6 +3702,7 @@ impl<'a> BodyChecker<'a> {
         }
         let signature = FunctionInfo {
             name: "$closure".into(),
+            type_parameters: Vec::new(),
             parameters: closure
                 .parameters
                 .iter()
@@ -3667,6 +3739,7 @@ impl<'a> BodyChecker<'a> {
             }
         }
         let mut checker = BodyChecker::new(
+            self.type_parameters,
             self.structures,
             self.enums,
             self.functions,
@@ -3729,6 +3802,7 @@ impl<'a> BodyChecker<'a> {
         let body = checker.check_block(&closure.body, false)?;
         let mut wrapped = vec![HirDeclaration::Function(HirFunction {
             name: String::new(),
+            type_parameters: Vec::new(),
             parameters: Vec::new(),
             return_type: result.clone(),
             body,
@@ -4078,9 +4152,33 @@ impl<'a> BodyChecker<'a> {
             ));
         }
 
+        let generic = !function.type_parameters.is_empty();
+        let mut inferred = HashMap::<String, ResolvedType>::new();
         let mut arguments = Vec::with_capacity(call.arguments.len());
         for (argument, parameter) in call.arguments.iter().zip(&function.parameters) {
-            let expression = self.check_expr(argument, &parameter.ty)?;
+            let expression = if generic {
+                let expression = self.synthesize_expr(argument)?;
+                if !expression.ty.is_value_type() || expression.ty.needs_db_runtime() {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        format!(
+                            "argumento `{}` não pode instanciar um parâmetro de tipo genérico",
+                            expression.ty
+                        ),
+                        argument.span,
+                    ));
+                }
+                unify_type(&parameter.ty, &expression.ty, &mut inferred).map_err(|message| {
+                    SemaError::new(
+                        SemaErrorKind::TypeMismatch,
+                        format!("`{callee}`: {message}"),
+                        argument.span,
+                    )
+                })?;
+                expression
+            } else {
+                self.check_expr(argument, &parameter.ty)?
+            };
             let pass_mode = match parameter.pass_mode {
                 ParameterPassMode::ByValue => {
                     if !expression.ty.is_copy() && is_place(&expression) {
@@ -4128,13 +4226,29 @@ impl<'a> BodyChecker<'a> {
             });
         }
 
+        let return_type = if generic {
+            for parameter in &function.type_parameters {
+                if !inferred.contains_key(parameter) {
+                    return Err(SemaError::new(
+                        SemaErrorKind::UnsupportedType,
+                        format!(
+                            "não foi possível inferir o parâmetro de tipo `{parameter}` de `{callee}`"
+                        ),
+                        span,
+                    ));
+                }
+            }
+            substitute_type(&function.return_type, &inferred)
+        } else {
+            function.return_type.clone()
+        };
         self.resolve_call_aliasing(&mut arguments)?;
         Ok(self.expr(
             HirExprKind::Call {
                 function: function.name,
                 arguments,
             },
-            function.return_type,
+            return_type,
             span,
         ))
     }
@@ -4666,12 +4780,109 @@ fn type_needs_box(
     }
 }
 
+fn unify_type(
+    pattern: &ResolvedType,
+    actual: &ResolvedType,
+    bindings: &mut HashMap<String, ResolvedType>,
+) -> Result<(), String> {
+    match pattern {
+        ResolvedType::TypeParam(name) => {
+            if let Some(existing) = bindings.get(name) {
+                if existing == actual {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "parâmetro de tipo `{name}` inferido como `{existing}` e `{actual}`"
+                ));
+            }
+            bindings.insert(name.clone(), actual.clone());
+            Ok(())
+        }
+        ResolvedType::Array(element) | ResolvedType::Optional(element) => {
+            let actual_element = match (pattern, actual) {
+                (ResolvedType::Array(_), ResolvedType::Array(actual))
+                | (ResolvedType::Optional(_), ResolvedType::Optional(actual)) => actual,
+                _ => return Err(format!("esperado `{pattern}`, recebeu `{actual}`")),
+            };
+            unify_type(element, actual_element, bindings)
+        }
+        ResolvedType::Result(ok, error) => {
+            let ResolvedType::Result(actual_ok, actual_error) = actual else {
+                return Err(format!("esperado `{pattern}`, recebeu `{actual}`"));
+            };
+            unify_type(ok, actual_ok, bindings)?;
+            unify_type(error, actual_error, bindings)
+        }
+        ResolvedType::Closure(parameters, result) => {
+            let ResolvedType::Closure(actual_parameters, actual_result) = actual else {
+                return Err(format!("esperado `{pattern}`, recebeu `{actual}`"));
+            };
+            if parameters.len() != actual_parameters.len() {
+                return Err(format!("esperado `{pattern}`, recebeu `{actual}`"));
+            }
+            for (pattern, actual) in parameters.iter().zip(actual_parameters) {
+                unify_type(pattern, actual, bindings)?;
+            }
+            unify_type(result, actual_result, bindings)
+        }
+        _ if pattern == actual => Ok(()),
+        _ => Err(format!("esperado `{pattern}`, recebeu `{actual}`")),
+    }
+}
+
+fn substitute_type(ty: &ResolvedType, bindings: &HashMap<String, ResolvedType>) -> ResolvedType {
+    match ty {
+        ResolvedType::TypeParam(name) => bindings.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        ResolvedType::Array(element) => {
+            ResolvedType::Array(Box::new(substitute_type(element, bindings)))
+        }
+        ResolvedType::Optional(element) => {
+            ResolvedType::Optional(Box::new(substitute_type(element, bindings)))
+        }
+        ResolvedType::Result(ok, error) => ResolvedType::Result(
+            Box::new(substitute_type(ok, bindings)),
+            Box::new(substitute_type(error, bindings)),
+        ),
+        ResolvedType::Closure(parameters, result) => ResolvedType::Closure(
+            parameters
+                .iter()
+                .map(|parameter| substitute_type(parameter, bindings))
+                .collect(),
+            Box::new(substitute_type(result, bindings)),
+        ),
+        _ => ty.clone(),
+    }
+}
+
+fn type_contains_param(ty: &ResolvedType, parameter: &str) -> bool {
+    match ty {
+        ResolvedType::TypeParam(name) => name == parameter,
+        ResolvedType::Array(inner) | ResolvedType::Optional(inner) => {
+            type_contains_param(inner, parameter)
+        }
+        ResolvedType::Result(ok, error) => {
+            type_contains_param(ok, parameter) || type_contains_param(error, parameter)
+        }
+        ResolvedType::Closure(parameters, result) => {
+            parameters
+                .iter()
+                .any(|ty| type_contains_param(ty, parameter))
+                || type_contains_param(result, parameter)
+        }
+        _ => false,
+    }
+}
+
 fn resolve_type(
     expression: &TypeExpression,
     known_structs: &HashSet<String>,
+    type_parameters: &HashSet<String>,
     position: TypePosition,
 ) -> Result<ResolvedType, SemaError> {
     let resolved = match &expression.kind {
+        TypeExpressionKind::Named(name) if type_parameters.contains(&name.name) => {
+            ResolvedType::TypeParam(name.name.clone())
+        }
         TypeExpressionKind::Named(name) => match name.name.as_str() {
             "int" => ResolvedType::Int,
             "number" => ResolvedType::Number,
@@ -4694,7 +4905,8 @@ fn resolve_type(
             }
         },
         TypeExpressionKind::Array(element) => {
-            let element = resolve_type(element, known_structs, TypePosition::Field)?;
+            let element =
+                resolve_type(element, known_structs, type_parameters, TypePosition::Field)?;
             if element == ResolvedType::Void {
                 return Err(SemaError::new(
                     SemaErrorKind::UnsupportedType,
@@ -4705,8 +4917,8 @@ fn resolve_type(
             ResolvedType::Array(Box::new(element))
         }
         TypeExpressionKind::Result(ok, error) => {
-            let ok = resolve_type(ok, known_structs, TypePosition::Return)?;
-            let error = resolve_type(error, known_structs, TypePosition::Field)?;
+            let ok = resolve_type(ok, known_structs, type_parameters, TypePosition::Return)?;
+            let error = resolve_type(error, known_structs, type_parameters, TypePosition::Field)?;
             if ok.contains_closure() || error.contains_closure() {
                 return Err(SemaError::new(
                     SemaErrorKind::UnsupportedType,
@@ -4717,7 +4929,8 @@ fn resolve_type(
             ResolvedType::Result(Box::new(ok), Box::new(error))
         }
         TypeExpressionKind::Optional(payload) => {
-            let payload = resolve_type(payload, known_structs, TypePosition::Field)?;
+            let payload =
+                resolve_type(payload, known_structs, type_parameters, TypePosition::Field)?;
             if matches!(payload, ResolvedType::Optional(_) | ResolvedType::Void) {
                 return Err(SemaError::new(
                     SemaErrorKind::UnsupportedType,
@@ -4730,7 +4943,12 @@ fn resolve_type(
         TypeExpressionKind::Function(parameters, result) => {
             let mut resolved = Vec::with_capacity(parameters.len());
             for parameter in parameters {
-                let ty = resolve_type(parameter, known_structs, TypePosition::Parameter)?;
+                let ty = resolve_type(
+                    parameter,
+                    known_structs,
+                    type_parameters,
+                    TypePosition::Parameter,
+                )?;
                 if ty == ResolvedType::Void {
                     return Err(SemaError::new(
                         SemaErrorKind::UnsupportedType,
@@ -4740,7 +4958,8 @@ fn resolve_type(
                 }
                 resolved.push(ty);
             }
-            let result = resolve_type(result, known_structs, TypePosition::Return)?;
+            let result =
+                resolve_type(result, known_structs, type_parameters, TypePosition::Return)?;
             ResolvedType::Closure(resolved, Box::new(result))
         }
     };

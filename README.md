@@ -252,6 +252,22 @@ const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 
 A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `Shape.Circle({ radius: 2.0 })`, and a payload-less variant with `Shape.Empty`; payload count/field names/types are checked. Enums are value types with structural equality, usable in arrays, parameters, returns, and `Option`/`Result` payloads. Matching requires exactly one arm per variant and binds payloads positionally; missing/duplicate/unknown variants are rejected. Enums can be interface fields and recursive payloads are wrapped in compiler-inserted `Box`; FFI parameters/returns still reject enums, and there are no explicit discriminants or TypeScript `type A = B | C` unions. Named-field variants bind positionally in field declaration order when matched. See [enums](docs/enums.md).
 
+## Generic functions
+
+Functions can declare type parameters inferred from each call:
+
+```lift
+function identity<T>(value: T): T { return value; }
+function same<T>(left: T, right: T): boolean { return left == right; }
+function wrap<T>(value: T): T[] { return [value]; }
+
+console.log(identity(42));
+console.log(same("a", "b"));
+const numbers: int[] = wrap(7);
+```
+
+Each type parameter must appear in an input parameter. Arguments are unified with the parameter types (`same(1, "x")` fails), and the generated Rust function carries `Clone + Debug + PartialEq` bounds. `T[]`, `T?`, `Result<T, E>`, nested generic calls, and equality are supported. There are no explicit type arguments, generic interfaces/enums/structs, generic methods, generic callbacks/FFI, or return-only type parameters. See [generic functions](docs/generics.md).
+
 ## Union types
 
 `type Shape = Circle | Square;` declares a nominal union whose members are existing named types. It lowers to an enum with one positional variant per member:
@@ -359,6 +375,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/enum-fields.lift` — named-field payloads, object-literal construction, and field-order matching.
 - `examples/recursive-enums.lift` — recursive enums with `Box` indirection, interface fields, and recursive matching.
 - `examples/unions.lift` — `type A = B | C` unions, object-literal construction, exhaustive matching, enum members, and recursion.
+- `examples/generics.lift` — generic identity/equality/containers with inferred type parameters.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

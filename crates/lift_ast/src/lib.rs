@@ -184,6 +184,8 @@ pub struct InterfaceField {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionDeclaration {
     pub name: Identifier,
+    /// Parâmetros de tipo genéricos (`function f<T>(...)`).
+    pub type_parameters: Vec<Identifier>,
     pub parameters: Vec<Parameter>,
     pub return_type: Option<TypeExpression>,
     pub body: Block,

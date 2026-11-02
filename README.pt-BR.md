@@ -252,6 +252,22 @@ const shapes: Shape[] = [Shape.Circle(2.0), Shape.Rect(2.0, 3.0), Shape.Empty];
 
 Uma variante é construída com `Shape.Circle(2.0)`, uma variante com campos nomeados com `Shape.Circle({ radius: 2.0 })`, e uma sem payload com `Shape.Empty`; contagem/nomes de campo/tipos são checados. Enums são tipos de valor com igualdade estrutural, utilizáveis em arrays, parâmetros, retornos e payloads de `Option`/`Result`. Match exige exatamente um braço por variante e liga payloads posicionalmente; variante ausente/duplicada/desconhecida é rejeitada. Enums podem ser campos de interface e payloads recursivos recebem `Box` inserido pelo compilador; parâmetros/retornos FFI ainda rejeitam enums, e não há discriminantes explícitos ou unions TypeScript `type A = B | C`. Variantes com campos nomeados ligam posicionalmente na ordem de declaração ao casar. Veja [enums](docs/enums.pt-BR.md).
 
+## Funções genéricas
+
+Funções podem declarar parâmetros de tipo inferidos em cada chamada:
+
+```lift
+function identity<T>(value: T): T { return value; }
+function same<T>(left: T, right: T): boolean { return left == right; }
+function wrap<T>(value: T): T[] { return [value]; }
+
+console.log(identity(42));
+console.log(same("a", "b"));
+const numbers: int[] = wrap(7);
+```
+
+Cada parâmetro de tipo precisa aparecer em um parâmetro de entrada. Argumentos são unificados com os tipos dos parâmetros (`same(1, "x")` falha), e a função Rust gerada recebe bounds `Clone + Debug + PartialEq`. `T[]`, `T?`, `Result<T, E>`, chamadas genéricas aninhadas e igualdade são suportados. Não há argumentos de tipo explícitos, interfaces/enums/structs genéricos, métodos genéricos, callbacks/FFI genéricos ou parâmetros usados só no retorno. Veja [funções genéricas](docs/generics.pt-BR.md).
+
 ## Tipos union
 
 `type Shape = Circle | Square;` declara uma união nominal cujos membros são tipos nomeados existentes. Ela é rebaixada para um enum com uma variante posicional por membro:
@@ -333,6 +349,7 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 - Matching cobre `Option`/`Result` e enums nominais; wildcards, guardas, patterns aninhados e tipos union TypeScript não foram implementados.
 - Enums suportam payloads posicionais/nomeados, recursão via `Box` automático, campos de interface e uniões `type A = B | C`; enums em FFI, discriminantes explícitos e métodos em enums não foram implementados.
 - Uniões exigem membros nominais interface/enum/union; membros primitivos/array/Option, tipos union inline, declarações alias e narrowing por discriminante não foram implementados.
+- Genéricos cobrem funções com inferência por argumento; interfaces/structs/enums genéricos, argumentos de tipo explícitos, métodos genéricos, callbacks/FFI genéricos e parâmetros usados só no retorno não foram implementados.
 - O [serviço local de notas](examples/notes-service/README.pt-BR.md) declara DTOs, handlers síncronos, rotas e SQL em Lift. A [API de banco](stdlib/lift_db/README.pt-BR.md) oferece pools SQLite/PostgreSQL configuráveis, execute/query parametrizado, resultados materializados e transações owned. O servidor possui o pool e os handlers o emprestam.
 
 O serviço exercita os contratos documentados de SQL/escalares e HTTP estático. Consulte o [plano de compatibilidade de banco](docs/database-compatibility.pt-BR.md) para a matriz de backends/versões e o [contrato de callbacks/HTTP](docs/callbacks-and-web-contract.pt-BR.md) para limites do adaptador.
@@ -358,6 +375,7 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 - `examples/enum-fields.lift` — payloads com campos nomeados, construção por object literal e matching na ordem dos campos.
 - `examples/recursive-enums.lift` — enums recursivos com indireção `Box`, campos de interface e matching recursivo.
 - `examples/unions.lift` — uniões `type A = B | C`, construção por object literal, matching exaustivo, membros enum e recursão.
+- `examples/generics.lift` — identidade/igualdade/containers genéricos com parâmetros de tipo inferidos.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 

@@ -1,0 +1,28 @@
+// EN: Generic functions inferred from call arguments.
+// PT-BR: Funções genéricas inferidas pelos argumentos da chamada.
+function identity<T>(value: T): T { return value; }
+function same<T>(left: T, right: T): boolean { return left == right; }
+function wrap<T>(value: T): T[] { return [value]; }
+function twice<T>(value: T): T { return identity(value); }
+function first<T>(values: T[]): T { return values[0]; }
+function fallback<T>(value: T?, other: T): T {
+    if value != null { return value; }
+    return other;
+}
+
+interface Point { x: int, y: int }
+
+console.log(identity(42));
+console.log(identity("hi"));
+console.log(identity(true));
+console.log(identity([1, 2])[0]);
+console.log(same(1, 1));
+console.log(same("a", "b"));
+const numbers: int[] = wrap(7);
+console.log(numbers[0]);
+const point: Point = { x: 1, y: 2 };
+const copy = identity(point);
+console.log(copy.x);
+console.log(twice(9));
+console.log(fallback(option.some(5), 0));
+console.log(first([4, 5, 6]));

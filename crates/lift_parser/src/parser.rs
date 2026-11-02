@@ -405,6 +405,16 @@ impl<'tokens> Parser<'tokens> {
         let start = self.current_span().start;
         self.consume(is_function);
         let name = self.parse_identifier()?;
+        let mut type_parameters = Vec::new();
+        if self.consume(|token| matches!(token, Token::Less)).is_some() {
+            loop {
+                type_parameters.push(self.parse_identifier()?);
+                if self.consume(is_comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(|token| matches!(token, Token::Greater), "`>`")?;
+        }
         self.expect(is_left_paren, "`(`")?;
         let mut parameters = Vec::new();
 
@@ -430,6 +440,7 @@ impl<'tokens> Parser<'tokens> {
 
         Ok(FunctionDeclaration {
             name,
+            type_parameters,
             parameters,
             return_type,
             span: self.span(start, body.span.end),

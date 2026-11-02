@@ -615,6 +615,36 @@ fn option_unwrap_none_is_an_explicit_runtime_failure() {
 }
 
 #[test]
+fn generics_example_runs_inferred_generic_functions() {
+    let directory = TempDir::new("generics");
+    let source = directory.path().join("generics.lift");
+    fs::write(&source, include_str!("../../../examples/generics.lift")).unwrap();
+    let expected = "42\nhi\ntrue\n1\ntrue\nfalse\n7\n1\n9\n5\n4\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("generics {command}"));
+        if command == "run" {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .replace("\r\n", "\n")
+                    .ends_with(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+    let binary = directory.path().join(binary_name("generics"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário generics");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn unions_example_runs_type_unions_and_matching() {
     let directory = TempDir::new("unions");
     let source = directory.path().join("unions.lift");

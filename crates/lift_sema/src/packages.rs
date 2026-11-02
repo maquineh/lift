@@ -89,6 +89,7 @@ pub fn analyze_project(project: ProjectAst) -> Result<HirProgram, Vec<SemaError>
                 format!("{}.", import.alias.name),
                 FunctionInfo {
                     name: String::new(),
+                    type_parameters: Vec::new(),
                     parameters: Vec::new(),
                     return_type: ResolvedType::Void,
                     has_explicit_return_type: true,
@@ -169,6 +170,7 @@ pub fn analyze_project(project: ProjectAst) -> Result<HirProgram, Vec<SemaError>
                     name,
                     FunctionInfo {
                         name: function.name.clone(),
+                        type_parameters: function.type_parameters.clone(),
                         parameters: function
                             .parameters
                             .iter()

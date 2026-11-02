@@ -2,7 +2,7 @@
 
 - **Data:** 2026-11-02 (America/Manaus)
 - **Branch:** `main`
-- **Último commit antes deste checkpoint:** `93e9a18 feat: support recursive enums and enum interface fields`
+- **Último commit antes deste checkpoint:** `cfdd859 docs: finalize union checkpoint`
 - **Estado:** incrementos abaixo implementados, testados, documentados e reunidos neste checkpoint. O working tree fica limpo após o commit; `target/` e `.lift_cache/` são ignorados.
 
 Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR tipado → Rust → binário). Ele complementa a matriz de testes e os contratos em `docs/`; não substitui essas fontes.
@@ -21,6 +21,7 @@ Este arquivo registra o ponto de retomada do compilador Lift (`.lift` → HIR ti
 10. **Enums com campos nomeados** — `Variante { campo: Tipo }`, construção `Enum.Variant({ campo: valor })`, validação de campos ausentes/desconhecidos/duplicados e match posicional na ordem de declaração.
 11. **Recursão e enums em interfaces** — payloads recursivos com `Box` automático, enums mutuamente recursivos, ciclos struct↔enum e campos de enum em interfaces.
 12. **Uniões nominais `type A = B | C`** — membros nominais desaçucarados para um enum, construção por `Shape.Circle(...)`, match exaustivo, membros enum e recursão.
+13. **Funções genéricas** — `function f<T>(...)` com inferência por argumento, `T[]`/`T?`/`Result<T, E>`, chamadas genéricas aninhadas e bounds Rust `Clone + Debug + PartialEq`.
 
 ## Contratos e limites atuais
 
@@ -42,7 +43,7 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
 ```
 
 - Formatação: limpa.
-- Testes: **235 passando**, **38 suítes**, 0 falhas.
+- Testes: **241 passando**, **39 suítes**, 0 falhas.
 - E2E por `check`, `build`, `run` e binário nativo dos exemplos:
   - `examples/loops.lift` → `6 1 2 3 7 8 1 3 4 5 10 20`
   - `examples/array-methods.lift` → `2 8 1 2 4 3 true true 1 2 3 4 10 #3 20 200`
@@ -51,8 +52,9 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - `examples/enum-fields.lift` → `12.56 / 6 / 0 / circle 2 / true`
   - `examples/recursive-enums.lift` → `6 / 3 / true`
   - `examples/unions.lift` → `12.56 / 9 / true / false / north / other / 1`
+  - `examples/generics.lift` → `42 / hi / true / 1 / true / false / 7 / 1 / 9 / 5 / 4`
   - `examples/errors.lift` e `examples/higher-order.lift` também cobertos por E2E.
-- `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift` e `examples/recursive-enums.lift` e `examples/unions.lift`: sem avisos.
+- `lift lint` em `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift` e `examples/recursive-enums.lift` e `examples/unions.lift` e `examples/generics.lift`: sem avisos.
 - Skips conhecidos e **pré-existentes** (não causados por estes incrementos): testes de banco cuja cadeia de dependências (`r2d2`/`scheduled-thread-pool`) pede rustc mais novo que o MSRV 1.94.1. Eles permanecem documentados na matriz de testes e devem ser reavaliados quando a dependência for atualizada.
 
 ## Onde retomar
@@ -68,13 +70,14 @@ cargo test --locked --workspace -- --skip db_value --skip opaque_resource_signat
   - [Match de Option/Result](docs/match.md) / [pt-BR](docs/match.pt-BR.md)
   - [Enums](docs/enums.md) / [pt-BR](docs/enums.pt-BR.md)
   - [Uniões](docs/unions.md) / [pt-BR](docs/unions.pt-BR.md)
+  - [Funções genéricas](docs/generics.md) / [pt-BR](docs/generics.pt-BR.md)
 - Matriz de cobertura e pendências: [docs/testing-and-release.md](docs/testing-and-release.md).
 - Mapa de crates, arquivos e exemplos: [docs/source-map.md](docs/source-map.md).
 - Decisões internas: [phase3](.agents/skills/truxt-compiler/references/phase3-decisions.md), [phase4](.agents/skills/truxt-compiler/references/phase4-decisions.md) e [phase5](.agents/skills/truxt-compiler/references/phase5-decisions.md).
-- Exemplos executáveis: `examples/option.lift`, `examples/interop.lift`, `examples/errors.lift`, `examples/higher-order.lift`, `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift`, `examples/recursive-enums.lift`, `examples/unions.lift`.
+- Exemplos executáveis: `examples/option.lift`, `examples/interop.lift`, `examples/errors.lift`, `examples/higher-order.lift`, `examples/loops.lift`, `examples/array-methods.lift`, `examples/match.lift`, `examples/enums.lift`, `examples/enum-fields.lift`, `examples/recursive-enums.lift`, `examples/unions.lift`, `examples/generics.lift`.
 
 ## Próximos passos sugeridos
 
-1. **Generics gerais** — containers e funções parametrizadas; próximo incremento, maior restante.
-2. **Captures mutáveis/`FnMut`** — hoje acumuladores usam `reduce` ou `for...of` explícito.
+1. **Containers genéricos** — estender genéricos para interfaces/structs/enums e argumentos de tipo explícitos; funções genéricas já concluídas.
+2. **Captures mutáveis/`FnMut`** — próximo incremento; hoje acumuladores usam `reduce` ou `for...of` explícito.
 3. Polimento: wildcard/guardas no `match`, `flatMap`/`sort`/índice em callbacks, `finally`/`?` em Option, escapes Unicode, melhorias de LSP.

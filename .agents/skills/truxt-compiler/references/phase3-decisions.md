@@ -183,3 +183,21 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   namespace de tipos (duplicatas rejeitadas); forward refs permitidas.
 - Construção/matching/igualdade/recursão reutilizam o caminho de enum; exemplo
   `examples/unions.lift`, testes `union_contract.rs`, docs `docs/unions*.md`.
+### Funções genéricas
+
+- AST/HIR `type_parameters`; parser aceita `function f<T, U>(...)`; tipos `T`
+  viram `ResolvedType::TypeParam`.
+- `resolve_type` recebe o conjunto de parâmetros do escopo; o BodyChecker propaga
+  o conjunto para anotações locais e closures.
+- Cada parâmetro precisa aparecer em um parâmetro de entrada (sem inferência por
+  retorno). Chamadas usam unificação estrutural (`unify_type`) e substituição
+  (`substitute_type`); argumentos são sintetizados sem tipo esperado.
+- Argumentos com recursos/DbValue/closures não instanciam `T`; função genérica
+  como valor é rejeitada; operações concretas (aritmética/templates/campos) são
+  rejeitadas sobre `T`; igualdade/clone funcionam.
+- Codegen emite fn Rust genérica com nomes mangleados e bounds
+  `Clone + Debug + PartialEq`; chamadas usam inferência do Rust.
+- Limites: sem interfaces/structs/enums genéricos, argumentos explícitos,
+  métodos genéricos, callbacks/FFI genéricos ou parâmetros só no retorno.
+  Exemplo `examples/generics.lift`, testes `generics_contract.rs`, docs
+  `docs/generics*.md`.

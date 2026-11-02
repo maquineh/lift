@@ -221,6 +221,39 @@ fn parses_enum_declarations_and_qualified_match_patterns() {
 }
 
 #[test]
+fn parses_generic_function_type_parameters() {
+    let source = r#"
+        function identity<T>(value: T): T { return value; }
+        function pair<T, U>(first: T, second: U): T { return first; }
+        const result = identity(1);
+    "#;
+    let program = parse_source(source).expect("funções genéricas");
+    let Declaration::Function(identity) = &program.declarations[0] else {
+        panic!("identity")
+    };
+    assert_eq!(identity.type_parameters.len(), 1);
+    assert_eq!(identity.type_parameters[0].name, "T");
+    let Declaration::Function(pair) = &program.declarations[1] else {
+        panic!("pair")
+    };
+    assert_eq!(
+        pair.type_parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["T", "U"]
+    );
+    for rejected in [
+        "function f<>(value: int): int { return value; }",
+        "function f<T(value: T): T { return value; }",
+        "function f<T,>(value: T): T { return value; }",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+    parse_source("function f<T>(value: T): T { return value; }").unwrap();
+}
+
+#[test]
 fn parses_union_type_declarations() {
     let source = r#"
         interface Circle { radius: number }

@@ -491,8 +491,24 @@ impl Emitter {
             })
             .collect::<Vec<_>>()
             .join(", ");
+        let generics = if function.type_parameters.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                function
+                    .type_parameters
+                    .iter()
+                    .map(|parameter| format!(
+                        "{}: ::std::clone::Clone + ::std::fmt::Debug + ::std::cmp::PartialEq",
+                        type_param_name(parameter)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         self.line(format!(
-            "fn {}({parameters}) -> {} {{",
+            "fn {}{generics}({parameters}) -> {} {{",
             self.function_name(&function.name),
             self.rust_type(&function.return_type)
         ));
@@ -1518,6 +1534,7 @@ impl Emitter {
             ResolvedType::Boolean => "bool".to_owned(),
             ResolvedType::Void => "()".to_owned(),
             ResolvedType::Struct(name) => self.type_name(name),
+            ResolvedType::TypeParam(name) => type_param_name(name),
             ResolvedType::DbValue => "::lift_db::api::DbValue".into(),
             ResolvedType::Resource(lift_sema::ResourceKind::DbPool) => {
                 "::lift_db::api::DbPool".into()
@@ -1671,4 +1688,8 @@ fn binary_operator(operator: BinaryOperator) -> &'static str {
         BinaryOperator::And => "&&",
         BinaryOperator::Or => "||",
     }
+}
+
+fn type_param_name(name: &str) -> String {
+    format!("__lift_tp_{name}")
 }

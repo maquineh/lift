@@ -35,6 +35,8 @@ pub enum ResolvedType {
     /// Adapter-owned handle. It has no fields, Clone, equality, or numeric identity.
     Resource(ResourceKind),
     Struct(String),
+    /// Parâmetro de tipo genérico (`T`); sempre instanciado em chamadas.
+    TypeParam(String),
     Array(Box<ResolvedType>),
     Optional(Box<ResolvedType>),
     Result(Box<ResolvedType>, Box<ResolvedType>),
@@ -121,7 +123,7 @@ impl fmt::Display for ResolvedType {
             Self::Resource(ResourceKind::SqliteTransaction) => {
                 formatter.write_str("SqliteTransaction")
             }
-            Self::Struct(name) => formatter.write_str(name),
+            Self::Struct(name) | Self::TypeParam(name) => formatter.write_str(name),
             Self::Array(element) => write!(formatter, "{element}[]"),
             Self::Optional(element) => write!(formatter, "{element}?"),
             Self::Result(ok, error) => write!(formatter, "Result<{ok}, {error}>"),
@@ -267,6 +269,8 @@ pub struct HirStructField {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HirFunction {
     pub name: String,
+    /// Parâmetros de tipo genéricos declarados na função.
+    pub type_parameters: Vec<String>,
     pub parameters: Vec<HirParameter>,
     pub return_type: ResolvedType,
     pub body: HirBlock,
