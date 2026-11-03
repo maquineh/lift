@@ -232,6 +232,14 @@ impl Monomorphizer<'_> {
                     self.expression(part);
                 }
             }
+            ExpressionKind::TypeApplication {
+                callee, arguments, ..
+            } => {
+                self.expression(callee);
+                for argument in arguments {
+                    self.ty(argument);
+                }
+            }
             ExpressionKind::TryPropagate(inner) | ExpressionKind::Grouping(inner) => {
                 self.expression(inner)
             }

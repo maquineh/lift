@@ -253,3 +253,15 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   genéricos, argumentos explícitos, funções sobre `Maybe<T>` ou FFI.
   Teste `generic_enums_contract.rs`, exemplo `examples/generic-enums.lift`, docs
   `docs/generic-enums*.md`.
+### Argumentos de tipo explícitos (`f::<T>`)
+
+- AST `ExpressionKind::TypeApplication { callee, arguments }`; parser reconhece
+  `:` `:` `<` como postfix antes da chamada (`postfix_binding_power`).
+- `check_call` desembrulha o callee, valida quantidade/tipos com
+  `resolve_local_type` e semeia `inferred` antes da unificação dos argumentos.
+  Usos como valor são rejeitados; funções não-genéricas rejeitam `::<...>`.
+- Codegen ignora os argumentos explícitos: a chamada Rust continua inferida.
+  Containers/enums genéricos são expandidos no `TypeApplication` pelo
+  monomorfizador.
+- Testes `explicit_type_arguments_contract.rs`, exemplo
+  `examples/explicit-type-arguments.lift`, docs `docs/explicit-type-arguments*.md`.

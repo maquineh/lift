@@ -632,6 +632,33 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn explicit_type_arguments_example_runs() {
+    let directory = TempDir::new("explicit-type-arguments");
+    let source = directory.path().join("explicit-type-arguments.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/explicit-type-arguments.lift"),
+    )
+    .unwrap();
+    let expected = "41\nhi\n1\n7\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("explicit-type-arguments {command}"));
+    }
+    let binary = directory
+        .path()
+        .join(binary_name("explicit-type-arguments"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário explicit-type-arguments");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn generic_enums_example_runs_monomorphized_variants() {
     let directory = TempDir::new("generic-enums");
     let source = directory.path().join("generic-enums.lift");

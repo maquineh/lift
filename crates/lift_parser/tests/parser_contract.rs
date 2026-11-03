@@ -221,6 +221,51 @@ fn parses_enum_declarations_and_qualified_match_patterns() {
 }
 
 #[test]
+fn parses_explicit_generic_type_arguments() {
+    let source = r#"
+        function identity<T>(value: T): T { return value; }
+        interface Box<T> { value: T }
+        const result = identity::<int>(1);
+        const boxed = identity::<Box<int>>({ value: 1 });
+    "#;
+    let program = parse_source(source).expect("argumentos explícitos");
+    let Declaration::Statement(Statement::Variable(variable)) = &program.declarations[2] else {
+        panic!("variable")
+    };
+    let ExpressionKind::Call(call) = &variable.initializer.kind else {
+        panic!("call")
+    };
+    let ExpressionKind::TypeApplication { arguments, .. } = &call.callee.kind else {
+        panic!("type application")
+    };
+    assert_eq!(arguments.len(), 1);
+    assert!(matches!(
+        arguments[0].kind,
+        lift_ast::TypeExpressionKind::Named(_)
+    ));
+    let Declaration::Statement(Statement::Variable(variable)) = &program.declarations[3] else {
+        panic!("variable")
+    };
+    let ExpressionKind::Call(call) = &variable.initializer.kind else {
+        panic!("call")
+    };
+    let ExpressionKind::TypeApplication { arguments, .. } = &call.callee.kind else {
+        panic!("type application")
+    };
+    assert!(matches!(
+        arguments[0].kind,
+        lift_ast::TypeExpressionKind::Generic { .. }
+    ));
+
+    for rejected in [
+        "function f<T>(value: T): T { return value; } const x = f::<>(1);",
+        "function f<T>(value: T): T { return value; } const x = f::<int(1);",
+    ] {
+        assert!(parse_source(rejected).is_err(), "{rejected}");
+    }
+}
+
+#[test]
 fn parses_generic_interface_declarations_and_type_applications() {
     let source = r#"
         interface Box<T> { value: T }

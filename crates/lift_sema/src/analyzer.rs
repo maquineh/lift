@@ -2520,6 +2520,11 @@ impl<'a> BodyChecker<'a> {
     fn synthesize_expr(&mut self, expression: &Expression) -> Result<HirExpr, SemaError> {
         match &expression.kind {
             ExpressionKind::Closure(closure) => self.check_closure(closure, expression.span),
+            ExpressionKind::TypeApplication { .. } => Err(SemaError::new(
+                SemaErrorKind::NotCallable,
+                "argumentos de tipo explícitos só são suportados em chamada",
+                expression.span,
+            )),
             ExpressionKind::TryPropagate(inner) => {
                 let value = self.synthesize_expr(inner)?;
                 let ResolvedType::Result(ok, error) = value.ty.clone() else {
@@ -3919,6 +3924,12 @@ impl<'a> BodyChecker<'a> {
         span: Span,
         call: &lift_ast::CallExpression,
     ) -> Result<HirExpr, SemaError> {
+        let (callee_expression, explicit_type_arguments) = match &call.callee.kind {
+            ExpressionKind::TypeApplication {
+                callee, arguments, ..
+            } => (callee.as_ref(), Some(arguments.as_slice())),
+            _ => (call.callee.as_ref(), None),
+        };
         if self.result_constructor(call).is_some() {
             return Err(SemaError::new(
                 SemaErrorKind::UnsupportedType,
@@ -4184,7 +4195,7 @@ impl<'a> BodyChecker<'a> {
                 );
             }
         }
-        let callee = direct_callee_name(&call.callee).ok_or_else(|| {
+        let callee = direct_callee_name(callee_expression).ok_or_else(|| {
             SemaError::new(
                 SemaErrorKind::NotCallable,
                 "somente chamadas diretas a funções nomeadas são suportadas nesta fase",
@@ -4218,7 +4229,33 @@ impl<'a> BodyChecker<'a> {
         }
 
         let generic = !function.type_parameters.is_empty();
+        if explicit_type_arguments.is_some() && !generic {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                format!("`{callee}` não declara parâmetros de tipo"),
+                call.callee.span,
+            ));
+        }
         let mut inferred = HashMap::<String, ResolvedType>::new();
+        if let Some(arguments) = explicit_type_arguments {
+            if arguments.len() != function.type_parameters.len() {
+                return Err(SemaError::new(
+                    SemaErrorKind::ArgumentCountMismatch,
+                    format!(
+                        "`{callee}` espera {} argumento(s) de tipo, recebeu {}",
+                        function.type_parameters.len(),
+                        arguments.len()
+                    ),
+                    call.callee.span,
+                ));
+            }
+            for (parameter, argument) in function.type_parameters.iter().zip(arguments) {
+                inferred.insert(
+                    parameter.clone(),
+                    self.resolve_local_type(argument, TypePosition::Field)?,
+                );
+            }
+        }
         let mut arguments = Vec::with_capacity(call.arguments.len());
         for (argument, parameter) in call.arguments.iter().zip(&function.parameters) {
             let expression = if generic {
@@ -5560,6 +5597,7 @@ fn if_returns_name(statement: &lift_ast::IfStatement, name: &str) -> bool {
 fn expression_contains_owned_name(expression: &Expression, name: &str) -> bool {
     match &expression.kind {
         ExpressionKind::Closure(_) | ExpressionKind::Template(_) => false,
+        ExpressionKind::TypeApplication { .. } => false,
         ExpressionKind::Identifier(identifier) => identifier.name == name,
         ExpressionKind::ObjectLiteral(object) => object
             .fields
@@ -5695,6 +5733,9 @@ fn collect_forwarded_mut_expr(
 ) {
     match &expression.kind {
         ExpressionKind::Closure(_) => {}
+        ExpressionKind::TypeApplication { callee, .. } => {
+            collect_forwarded_mut_expr(callee, caller, functions, needs_mut);
+        }
         ExpressionKind::Template(parts) => {
             for part in parts {
                 collect_forwarded_mut_expr(part, caller, functions, needs_mut);
@@ -6001,6 +6042,7 @@ fn expression_mentions_name(expression: &Expression, name: &str) -> bool {
     match &expression.kind {
         ExpressionKind::Identifier(identifier) => identifier.name == name,
         ExpressionKind::Closure(closure) => block_mentions_name(&closure.body, name),
+        ExpressionKind::TypeApplication { callee, .. } => expression_mentions_name(callee, name),
         ExpressionKind::Template(parts) => parts
             .iter()
             .any(|part| expression_mentions_name(part, name)),

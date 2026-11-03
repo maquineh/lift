@@ -1,0 +1,14 @@
+// EN: Explicit generic type arguments (`f::<T>(...)`).
+// PT-BR: Argumentos de tipo explícitos em chamadas genéricas.
+function identity<T>(value: T): T { return value; }
+function first<T>(values: T[]): T { return values[0]; }
+
+interface Box<T> { value: T }
+
+console.log(identity::<int>(41));
+console.log(identity::<string>("hi"));
+console.log(first::<int>([1, 2]));
+
+const boxes: Box<int>[] = [{ value: 7 }];
+const boxed = first::<Box<int>>(boxes);
+console.log(boxed.value);

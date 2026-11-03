@@ -439,6 +439,12 @@ pub enum ExpressionKind {
     Binary(BinaryExpression),
     FieldAccess(FieldAccessExpression),
     Call(CallExpression),
+    /// `f::<T>(...)`: argumentos de tipo explícitos apenas no callee.
+    TypeApplication {
+        callee: Box<Expression>,
+        arguments: Vec<TypeExpression>,
+        span: Span,
+    },
     Index(IndexExpression),
     Grouping(Box<Expression>),
 }

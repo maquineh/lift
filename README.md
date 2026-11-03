@@ -256,6 +256,18 @@ A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `S
 
 Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
 
+## Explicit type arguments
+
+Generic calls can pin their type parameters with `::<...>`:
+
+```lift
+function identity<T>(value: T): T { return value; }
+console.log(identity::<int>(41));
+console.log(identity::<string>("hi"));
+```
+
+The suffix is only valid on a direct call, must match the parameter count, seeds inference (arguments are still checked), and rejects non-generic functions. See [explicit type arguments](docs/explicit-type-arguments.md).
+
 ## Generic enums
 
 Generic enums are monomorphized like containers:
@@ -414,6 +426,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/generic-containers.lift` — `Box<T>`, nested containers, `Pair<A,B>` and a `Map<K,V>`-shaped interface.
 - `examples/capture-fields.lift` — field and method mutation of captured structs.
 - `examples/generic-enums.lift` — `Maybe<T>`, recursive `List<T>`, named generic variants and matching.
+- `examples/explicit-type-arguments.lift` — `identity::<int>`, `first::<Box<int>>` and explicit container arguments.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

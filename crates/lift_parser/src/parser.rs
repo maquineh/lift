@@ -1256,6 +1256,31 @@ impl<'tokens> Parser<'tokens> {
                     span,
                 })
             }
+            Some(Token::Colon)
+                if self.check_n(1, is_colon)
+                    && self.check_n(2, |token| matches!(token, Token::Less)) =>
+            {
+                self.advance();
+                self.advance();
+                self.expect(|token| matches!(token, Token::Less), "`<`")?;
+                let mut arguments = Vec::new();
+                loop {
+                    arguments.push(self.parse_type()?);
+                    if self.consume(is_comma).is_none() {
+                        break;
+                    }
+                }
+                let close = self.expect(|token| matches!(token, Token::Greater), "`>`")?;
+                let span = self.span(left.span.start, close.end);
+                Ok(Expression {
+                    kind: ExpressionKind::TypeApplication {
+                        callee: Box::new(left),
+                        arguments,
+                        span,
+                    },
+                    span,
+                })
+            }
             Some(Token::LeftParen) => {
                 self.advance();
                 let mut arguments = Vec::new();
@@ -1312,6 +1337,12 @@ impl<'tokens> Parser<'tokens> {
     fn postfix_binding_power(&self) -> Option<u8> {
         match self.current() {
             Some(Token::Dot | Token::LeftParen | Token::LeftBracket | Token::Question) => {
+                Some(POSTFIX_BINDING_POWER)
+            }
+            Some(Token::Colon)
+                if self.check_n(1, is_colon)
+                    && self.check_n(2, |token| matches!(token, Token::Less)) =>
+            {
                 Some(POSTFIX_BINDING_POWER)
             }
             _ => None,
