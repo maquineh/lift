@@ -100,6 +100,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `examples/registry.lift` | Consume `num-integer` 0.1.46 from the registry and print a GCD. |
 | `examples/liveness.lift` | Exercise clone/move decisions across control flow and verify observable outputs with rustc. |
 | `examples/option.lift` | Counters proving exactly-once/lazy fallbacks, optional arrays and fields (omitted and explicit), flow narrowing across guards and loops, and retained sources. |
+| `examples/capture-fields.lift` | Field and method mutation of captured structs through `Rc<RefCell<T>>`. |
 | `examples/fnmut.lift` | Mutable closure captures with persistent independent state. |
 | `examples/generic-containers.lift` | `Box<T>`, nested containers, `Pair<A,B>`, Map-shaped interface and native execution. |
 | `examples/generics.lift` | Inferred generic identity/equality/containers and native execution. |

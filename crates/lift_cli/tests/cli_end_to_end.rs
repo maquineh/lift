@@ -632,6 +632,31 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn capture_fields_example_runs_field_and_method_mutation() {
+    let directory = TempDir::new("capture-fields");
+    let source = directory.path().join("capture-fields.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/capture-fields.lift"),
+    )
+    .unwrap();
+    let expected = "1\n2\n3\n1\n2\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("capture-fields {command}"));
+    }
+    let binary = directory.path().join(binary_name("capture-fields"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário capture-fields");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn generic_containers_example_runs_monomorphized_interfaces() {
     let directory = TempDir::new("generic-containers");
     let source = directory.path().join("generic-containers.lift");

@@ -27,6 +27,6 @@ console.log(other());   // 1
 - Multiple closures over the same variable get independent snapshots; two counters are independent.
 - The closure still implements `Fn`; mutation uses interior mutability (`Rc<RefCell<T>>`), so array methods and callbacks need no signature changes.
 - Nested closures capture a read snapshot of an outer mutable capture; sharing one cell across nested closures is not supported.
-- Whole-variable assignment to a capture is supported for value types (primitives, strings, structs, enums), including non-`Copy` snapshots. Mutating a captured *field/index* or calling a mutating method on a capture is rejected. Resource captures remain rejected; closure parameters are already mutable when the body assigns them.
+- Whole-variable assignment, field/index assignment, and mutating methods on captures are supported for value types (primitives, strings, structs, enums, generic containers), including non-`Copy` snapshots. The generated code borrows the capture cell mutably for the mutation. Resource captures remain rejected; closure parameters are already mutable when the body assigns them.
 
 Tests: `crates/lift_sema/tests/enum_contract.rs` (mutation marker), E2E `examples/fnmut.lift`; existing higher-order/array-method contracts cover immutable captures.

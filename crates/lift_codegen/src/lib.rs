@@ -704,13 +704,16 @@ impl Emitter {
             }
             HirStatement::Assignment(assignment) => {
                 let value = self.expression(&assignment.value);
-                if let HirExprKind::Local { id, .. } = &assignment.target.kind {
-                    if let Some(cell) = self.capture_cells.get(id).cloned() {
-                        let temporary = self.temp_name();
-                        self.line(format!("let {temporary} = {value};"));
-                        self.line(format!("*{cell}.borrow_mut() = {temporary};"));
-                        return;
-                    }
+                if let Some((cell, suffix)) = self.capture_place(&assignment.target) {
+                    let temporary = self.temp_name();
+                    self.line(format!("let {temporary} = {value};"));
+                    let place = if suffix.is_empty() {
+                        format!("*{cell}.borrow_mut()")
+                    } else {
+                        format!("{cell}.borrow_mut(){suffix}")
+                    };
+                    self.line(format!("{place} = {temporary};"));
+                    return;
                 }
                 let target = self.expression(&assignment.target);
                 self.line(format!("{target} = {value};"));
@@ -1472,6 +1475,20 @@ impl Emitter {
         format!("{{\n{body}\n{parent_indent}}}")
     }
 
+    fn capture_place(&self, expression: &HirExpr) -> Option<(String, String)> {
+        match &expression.kind {
+            HirExprKind::Local { id, .. } => self
+                .capture_cells
+                .get(id)
+                .map(|cell| (cell.clone(), String::new())),
+            HirExprKind::FieldAccess { object, field } => {
+                let (cell, suffix) = self.capture_place(object)?;
+                Some((cell, format!("{suffix}.{}", field_name(field))))
+            }
+            _ => None,
+        }
+    }
+
     fn staged_argument_value(&mut self, argument: &HirCallArgument) -> String {
         match argument.pass_mode {
             ArgPassMode::ByClone => clone_expression(
@@ -1517,6 +1534,12 @@ impl Emitter {
             ArgPassMode::ByMutRef => {
                 if let Some(temp) = temp {
                     format!("&mut {temp}")
+                } else if let Some((cell, suffix)) = self.capture_place(&argument.expression) {
+                    if suffix.is_empty() {
+                        format!("&mut *{cell}.borrow_mut()")
+                    } else {
+                        format!("&mut {cell}.borrow_mut(){suffix}")
+                    }
                 } else {
                     let expression = self.expression(&argument.expression);
                     if let Some(id) = direct_local_id(&argument.expression) {

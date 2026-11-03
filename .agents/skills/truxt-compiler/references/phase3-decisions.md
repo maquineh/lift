@@ -227,3 +227,14 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   métodos/impl genéricos, FFI/imports genéricos ou `Map` nativo.
   Testes `generic_containers_contract.rs`, exemplo `examples/generic-containers.lift`,
   docs `docs/generic-containers*.md`.
+### Mutação de campos/métodos em captures
+
+- Captures mutáveis de qualquer tipo de valor viram `Rc<RefCell<T>>` (não apenas
+  `Copy`). O codegen mapeia o binding raiz para a célula e reescreve:
+  - atribuição de campo/índice: avalia o RHS em temporário e gera
+    `cell.borrow_mut().campo[...] = temp` (com `*` quando o alvo é a célula);
+  - receptor de método com `&mut self`: `&mut cell.borrow_mut().campo`.
+- `capture_place` percorre cadeias de `FieldAccess` para montar o lugar; índices
+  ainda não entram nessa cadeia. As antigas rejeições de captura não-`Copy` e de
+  mutação de campo foram removidas; testes antigos ajustados.
+- Exemplo `examples/capture-fields.lift`, E2E, docs `docs/fnmut*.md`.

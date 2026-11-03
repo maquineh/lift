@@ -398,6 +398,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/generics.lift` — generic identity/equality/containers with inferred type parameters.
 - `examples/fnmut.lift` — mutable closure state with independent counters.
 - `examples/generic-containers.lift` — `Box<T>`, nested containers, `Pair<A,B>` and a `Map<K,V>`-shaped interface.
+- `examples/capture-fields.lift` — field and method mutation of captured structs.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

@@ -99,6 +99,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `examples/registry.lift` | Consome `num-integer` 0.1.46 do registry e imprime um MDC. |
 | `examples/liveness.lift` | Decisões clone/move no controle de fluxo com saídas observáveis verificadas por rustc. |
 | `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays e campos opcionais (omitidos e explícitos), narrowing entre guardas e loops e preservação de origens. |
+| `examples/capture-fields.lift` | Mutação de campo/método em structs capturadas via `Rc<RefCell<T>>`. |
 | `examples/fnmut.lift` | Captures mutáveis de closure com estado persistente independente. |
 | `examples/generic-containers.lift` | `Box<T>`, containers aninhados, `Pair<A,B>`, interface Map-shaped e execução nativa. |
 | `examples/generics.lift` | Identidade/igualdade/containers genéricos inferidos e execução nativa. |

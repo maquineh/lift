@@ -1,0 +1,32 @@
+// EN: Field and method mutation of closure captures.
+// PT-BR: Mutação de campo e método em captures de closure.
+interface Counter { calls: int }
+
+function makeCounter(): () => int {
+    let counter: Counter = { calls: 0 };
+    return (): int => {
+        counter.calls = counter.calls + 1;
+        return counter.calls;
+    };
+}
+
+const counter = makeCounter();
+console.log(counter());
+console.log(counter());
+console.log(counter());
+
+impl Counter {
+    bump(): int {
+        this.calls = this.calls + 1;
+        return this.calls;
+    }
+}
+
+function makeBumper(): () => int {
+    let state: Counter = { calls: 0 };
+    return (): int => state.bump();
+}
+
+const bumper = makeBumper();
+console.log(bumper());
+console.log(bumper());

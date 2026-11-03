@@ -92,7 +92,6 @@ fn rejects_unsupported_closure_and_template_ownership_patterns() {
         "const f = (): int => 1; const xs = [f];",
         "const f = (): int => 1; const x = option.some(f);",
         "const f = (): int => 1; const eq = f == f;",
-        "interface X { n: int } const x: X = { n: 1 }; const f = (): int => { x.n = 2; return x.n; };",
         "interface X { n: int } const x: X = { n: 1 }; const s = `${x}`;",
         "impl Missing { f(): int { return 1; } }",
         "interface X { n: int } impl X { f(this: int): int { return 1; } }",

@@ -217,7 +217,6 @@ fn callbacks_are_rejected_in_aggregates_resources_and_capture_mutation() {
         r#"import function close_pool(pool: DbPool): void from "lift_db::api::close_pool"; const f = close_pool;"#,
         "function f(callback: (void) => int): int { return 1; }",
         "function apply(value: int, transform: (int) => int): int { return transform(value); } function text(value: string): string { return value; } const result = apply(1, text);",
-        "interface Counter { calls: int } const counter: Counter = { calls: 0 }; const f = (): int => { counter.calls = 1; return counter.calls; };",
     ] {
         assert!(lower(source).is_err(), "must reject: {source}");
     }

@@ -398,6 +398,7 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 - `examples/generics.lift` — identidade/igualdade/containers genéricos com parâmetros de tipo inferidos.
 - `examples/fnmut.lift` — estado mutável de closure com contadores independentes.
 - `examples/generic-containers.lift` — `Box<T>`, containers aninhados, `Pair<A,B>` e uma interface no formato `Map<K,V>`.
+- `examples/capture-fields.lift` — mutação de campo e método em structs capturadas.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 
