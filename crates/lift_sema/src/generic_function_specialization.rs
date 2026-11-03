@@ -385,7 +385,7 @@ fn rewrite_type(
     }
 }
 
-fn substitute_function_types(
+pub(super) fn substitute_function_types(
     function: &mut FunctionDeclaration,
     substitutions: &HashMap<String, TypeExpression>,
 ) {

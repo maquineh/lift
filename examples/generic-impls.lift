@@ -1,0 +1,16 @@
+// EN: Generic impl methods specialized for each container instantiation.
+// PT-BR: Métodos de impl genérico especializados por instanciação de container.
+interface Box<T> { value: T }
+
+impl Box<T> {
+    get(): T { return this.value; }
+    set(value: T): void { this.value = value; }
+}
+
+let integer: Box<int> = { value: 1 };
+console.log(integer.get());
+integer.set(2);
+console.log(integer.get());
+
+let text: Box<string> = { value: "hi" };
+console.log(text.get());

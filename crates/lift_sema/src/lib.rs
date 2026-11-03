@@ -10,6 +10,7 @@
 mod analyzer;
 mod generic_containers;
 mod generic_function_specialization;
+mod generic_impl_specialization;
 mod interop;
 mod liveness;
 mod resources;

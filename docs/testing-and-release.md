@@ -16,6 +16,7 @@ compatibility or support for every Rust crate.
 | Option and Result | `option_contract.rs`, `semantic_contract.rs`; coalescing, optional-field, narrowing, I/O, unwrap, direct FFI Option, and borrowed Result parameter E2E cases in `cli_end_to_end.rs` | invalid types, eager fallbacks, wrong-variant unwraps, mutation through narrowed bindings, non-narrowable `let`/projections, nested optional fields, narrowing inside the condition expression, and Option nested in arrays or Option<Result> |
 | Errors and propagation | `errors_contract.rs`; `examples/errors.lift` through check/build/run in `cli_end_to_end.rs` | constructors without context or with wrong arity, `?`/`throw` without a compatible target or with mismatched error types, `?` on Option, catch shadowing or `void` type, and missing return after a fallthrough `try` |
 | Mutable captures | `enum_contract.rs` mutation marker; `examples/fnmut.lift` and `examples/capture-fields.lift` E2E | whole-variable/field/method mutation, shared `Copy` state, isolated non-`Copy` snapshots, and persistent closure state |
+| Generic impl methods | `generic_impls_contract.rs`; `examples/generic-impls.lift` E2E | per-application specialization, `this` mutation, multiple instantiations, unknown targets |
 | Generic functions over containers | `generic_container_functions_contract.rs`; `examples/generic-container-functions.lift` E2E | explicit specialization, nested container calls, substitution, calls without explicit arguments rejected |
 | Explicit type arguments | `explicit_type_arguments_contract.rs`; `examples/explicit-type-arguments.lift` E2E | arity, conflicts with actual arguments, non-generic callees, value use, container/enum type arguments |
 | Generic enums | `generic_enums_contract.rs`; `examples/generic-enums.lift` E2E | arity/duplicate parameters, recursion/Box, named variants, containers, construction/match with expected type, unknown templates |
@@ -46,7 +47,7 @@ readiness for arbitrary TypeScript code.
 | Feature | Current status | Acceptance required after implementation |
 | --- | --- | --- |
 | General generics | `Result<T, E>` is a special built-in type; general generic type parameters are absent. | valid declarations, instantiations, calls, and nested types; invalid arity/combinations rejected before Rust. |
-| Generic methods and FFI containers | Container-generic functions work through explicit specialization, but generic methods/impl, FFI generic containers, and native Map APIs are absent. | generic methods, FFI containers, and Map APIs rejected. |
+| Generic FFI containers and Map | Generic impls and functions work through specialization, but FFI generic containers and a native Map API are absent. | FFI generic containers and Map APIs rejected. |
 | General pattern matching | Lift has `match` for `Option<T>`, `Result<T, E>`, and nominal enums, with fixed patterns. Primitives, guards, wildcards, nested patterns, and match expressions are absent. | matching accepted algebraic types, exhaustiveness, unreachable/duplicate arms, guards/nesting, and executed behavior. |
 
 Each item first needs an explicit semantic contract. Acceptance must then cover

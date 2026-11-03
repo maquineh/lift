@@ -80,6 +80,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `crates/lift_sema/tests/liveness_contract.rs` | Last-use eligibility and conservative counterexamples at joins, returns, loops, reassignment, calls, borrowed parameters, and projections. |
 | `crates/lift_sema/tests/option_contract.rs` | Optional/null typing, explicit lazy coalescing modes, required versus omittable optional fields, flow narrowing (branches, guards, else-if, loops, captures, rejected mutations), inference limits, cycles, FFI nesting/local-struct rejection, and conservative ownership. |
 | `crates/lift_sema/tests/ffi_structs_options_contract.rs` | External layout resolution and dependencies, field/type validation, struct/Option/Result FFI acceptance and rejection, and borrowed parameter modes. |
+| `crates/lift_sema/tests/generic_impls_contract.rs` | Generic impl collection, per-application specialization, method substitution and unknown-target rejection. |
 | `crates/lift_sema/tests/generic_container_functions_contract.rs` | Explicit specialization of container-generic functions, nested calls, substitution, and rejection without explicit arguments. |
 | `crates/lift_sema/tests/explicit_type_arguments_contract.rs` | `::<T>` parsing, explicit instantiation, container arguments, and rejection rules. |
 | `crates/lift_sema/tests/generic_enums_contract.rs` | Generic enum declarations, monomorphization/substitution, recursive Box fields, named variants, containers. |
@@ -105,6 +106,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `examples/option.lift` | Counters proving exactly-once/lazy fallbacks, optional arrays and fields (omitted and explicit), flow narrowing across guards and loops, and retained sources. |
 | `examples/capture-fields.lift` | Field and method mutation of captured structs through `Rc<RefCell<T>>`. |
 | `examples/fnmut.lift` | Mutable closure captures with persistent independent state. |
+| `examples/generic-impls.lift` | Generic `impl Box<T>` methods specialized for concrete containers. |
 | `examples/generic-container-functions.lift` | Container-generic function specialization and nested calls. |
 | `examples/explicit-type-arguments.lift` | Explicit generic calls with primitive and container type arguments. |
 | `examples/generic-enums.lift` | `Maybe<T>`, recursive `List<T>`, named generic variants, matching. |

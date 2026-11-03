@@ -141,6 +141,16 @@ impl<'tokens> Parser<'tokens> {
                 let start = self.current_span().start;
                 self.advance();
                 let target = self.parse_identifier()?;
+                let mut type_parameters = Vec::new();
+                if self.consume(|token| matches!(token, Token::Less)).is_some() {
+                    loop {
+                        type_parameters.push(self.parse_identifier()?);
+                        if self.consume(is_comma).is_none() {
+                            break;
+                        }
+                    }
+                    self.expect(|token| matches!(token, Token::Greater), "`>`")?;
+                }
                 self.expect(is_left_brace, "`{`")?;
                 let mut methods = Vec::new();
                 while !self.check(is_right_brace) && !self.is_at_end() {
@@ -149,6 +159,7 @@ impl<'tokens> Parser<'tokens> {
                 let end = self.expect(is_right_brace, "`}`")?.end;
                 Ok(Declaration::Impl(lift_ast::ImplDeclaration {
                     target,
+                    type_parameters,
                     methods,
                     span: self.span(start, end),
                 }))

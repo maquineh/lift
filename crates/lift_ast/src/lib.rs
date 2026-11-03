@@ -99,6 +99,8 @@ pub struct PackageImportDeclaration {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImplDeclaration {
     pub target: Identifier,
+    /// Parâmetros de tipo de um impl genérico (`impl Box<T>`).
+    pub type_parameters: Vec<Identifier>,
     pub methods: Vec<FunctionDeclaration>,
     pub span: Span,
 }

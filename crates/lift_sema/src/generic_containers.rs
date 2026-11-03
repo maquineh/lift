@@ -149,7 +149,17 @@ impl Monomorphizer<'_> {
                 self.ty(&mut import.return_type);
             }
             Declaration::Statement(statement) => self.statement(statement),
-            Declaration::Impl(_) => {}
+            Declaration::Impl(implementation) => {
+                for method in &mut implementation.methods {
+                    for parameter in &mut method.parameters {
+                        self.ty(&mut parameter.ty);
+                    }
+                    if let Some(return_type) = &mut method.return_type {
+                        self.ty(return_type);
+                    }
+                    self.block(&mut method.body);
+                }
+            }
             Declaration::ModuleImport(_) | Declaration::PackageImport(_) => {}
         }
     }

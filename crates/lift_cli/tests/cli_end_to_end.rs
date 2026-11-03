@@ -632,6 +632,31 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn generic_impls_example_runs_specialized_methods() {
+    let directory = TempDir::new("generic-impls");
+    let source = directory.path().join("generic-impls.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/generic-impls.lift"),
+    )
+    .unwrap();
+    let expected = "1\n2\nhi\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("generic-impls {command}"));
+    }
+    let binary = directory.path().join(binary_name("generic-impls"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário generic-impls");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn generic_container_functions_example_runs_specialized_calls() {
     let directory = TempDir::new("generic-container-functions");
     let source = directory.path().join("generic-container-functions.lift");

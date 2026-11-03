@@ -277,3 +277,15 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   genérica ou Map nativo. Testes `generic_container_functions_contract.rs`,
   exemplo `examples/generic-container-functions.lift`, docs
   `docs/generic-container-functions*.md`.
+### Impls genéricos especializados
+
+- `ImplDeclaration.type_parameters`; parser aceita `impl Box<T> { ... }`.
+- `generic_impl_specialization` roda antes do monomorfizador de containers e
+  descobre aplicações concretas do alvo em anotações/assinaturas/locais; gera
+  um `ImplDeclaration` concreto por aplicação, com `T` substituído nos métodos.
+- O monomorfizador de containers passou a processar métodos de impls concretos;
+  `lower_impls` roda depois e adiciona `this: Box<int>`/mangleia nomes.
+- Template genérico é removido; sem aplicação não há métodos. Sem enum/extern,
+  métodos genéricos aninhados, FFI genérica ou Map nativo.
+  Testes `generic_impls_contract.rs`, exemplo `examples/generic-impls.lift`,
+  docs `docs/generic-impls*.md`.
