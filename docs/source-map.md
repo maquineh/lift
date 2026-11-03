@@ -80,6 +80,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `crates/lift_sema/tests/liveness_contract.rs` | Last-use eligibility and conservative counterexamples at joins, returns, loops, reassignment, calls, borrowed parameters, and projections. |
 | `crates/lift_sema/tests/option_contract.rs` | Optional/null typing, explicit lazy coalescing modes, required versus omittable optional fields, flow narrowing (branches, guards, else-if, loops, captures, rejected mutations), inference limits, cycles, FFI nesting/local-struct rejection, and conservative ownership. |
 | `crates/lift_sema/tests/ffi_structs_options_contract.rs` | External layout resolution and dependencies, field/type validation, struct/Option/Result FFI acceptance and rejection, and borrowed parameter modes. |
+| `crates/lift_sema/tests/generic_containers_contract.rs` | Generic interface declarations, monomorphization/substitution, nested containers, arity/duplicate validation. |
 | `crates/lift_sema/tests/generics_contract.rs` | Generic function declaration, per-call inference, containers/optionals, nested calls, invalid parameters, and function-value rejection. |
 | `crates/lift_sema/tests/union_contract.rs` | `type A = B | C` declarations, member validation, enum desugaring, object-literal construction, exhaustive match, enum members, and recursive unions. |
 | `crates/lift_sema/tests/enum_contract.rs` | Enum declaration/typing, positional/named payloads, recursive Box indirection, interface fields, qualified exhaustive match, limits (FFI/DbValue), equality, option payloads, and clone semantics. |
@@ -100,6 +101,7 @@ executes `examples/methods-closures-templates.lift` with expected stdout.
 | `examples/liveness.lift` | Exercise clone/move decisions across control flow and verify observable outputs with rustc. |
 | `examples/option.lift` | Counters proving exactly-once/lazy fallbacks, optional arrays and fields (omitted and explicit), flow narrowing across guards and loops, and retained sources. |
 | `examples/fnmut.lift` | Mutable closure captures with persistent independent state. |
+| `examples/generic-containers.lift` | `Box<T>`, nested containers, `Pair<A,B>`, Map-shaped interface and native execution. |
 | `examples/generics.lift` | Inferred generic identity/equality/containers and native execution. |
 | `examples/unions.lift` | `type A = B | C` unions, object-literal construction, exhaustive matching, enum members, and recursion. |
 | `examples/recursive-enums.lift` | Recursive enums with automatic Box, interface enum fields, and recursive matching. |

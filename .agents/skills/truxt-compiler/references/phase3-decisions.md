@@ -212,3 +212,18 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   snapshot não atualiza a variável externa. Closures aninhadas capturam leitura.
 - Teste `closures_mutate_captured_state`, exemplo `examples/fnmut.lift`, docs
   `docs/fnmut*.md`.
+### Containers genéricos por monomorfização de AST
+
+- Interfaces com `type_parameters` são templates; aplicações `Name<Args>` são
+  expandidas antes da sema por `generic_containers::expand_generic_interfaces`.
+- A expansão substitui parâmetros nos campos, gera uma `InterfaceDeclaration`
+  sintética com nome canônico (`Box<int>`, `Map<string, int>`) e reescreve a
+  anotação para `Named(canonical)`. Recursão por arrays funciona; o ciclo de
+  valor direto continua rejeitado pela checagem existente.
+- Templates são removidos da AST; uso sem argumentos vira tipo desconhecido.
+  Aridade e parâmetros duplicados geram erros. O codegen não muda: structs
+  sintéticas são resolvidas/emitidas como structs concretas com nome mangleado.
+- Limites: sem enums genéricos, funções sobre `Box<T>`, argumentos explícitos,
+  métodos/impl genéricos, FFI/imports genéricos ou `Map` nativo.
+  Testes `generic_containers_contract.rs`, exemplo `examples/generic-containers.lift`,
+  docs `docs/generic-containers*.md`.

@@ -311,7 +311,12 @@ pub(super) fn analyze_context(
     ast: ProgramAst,
     external: HashMap<String, FunctionInfo>,
 ) -> Result<HirProgram, Vec<SemaError>> {
-    let ast = lower_impls(ast)?;
+    let mut ast = lower_impls(ast)?;
+    let mut generic_errors = Vec::new();
+    crate::generic_containers::expand_generic_interfaces(&mut ast, &mut generic_errors);
+    if !generic_errors.is_empty() {
+        return Err(generic_errors);
+    }
     let unresolved = ast
         .declarations
         .iter()

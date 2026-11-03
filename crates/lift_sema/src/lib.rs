@@ -8,6 +8,7 @@
 //! avaliação de argumentos e decisões de clonagem necessárias ao codegen.
 
 mod analyzer;
+mod generic_containers;
 mod interop;
 mod liveness;
 mod resources;

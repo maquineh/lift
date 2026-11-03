@@ -1,0 +1,25 @@
+// EN: Generic interface containers (Box, Pair, Map-like) monomorphized per use.
+// PT-BR: Containers de interface genérica (Box, Pair, Map-like) monomorfizados por uso.
+interface Box<T> { value: T }
+interface Pair<A, B> { left: A, right: B }
+interface Map<K, V> { keys: K[], values: V[] }
+
+const boxed: Box<int> = { value: 41 };
+console.log(boxed.value + 1);
+
+const nested: Box<Box<string>> = { value: { value: "hi" } };
+console.log(nested.value.value);
+
+const maybe: Box<int?> = { value: option.some(7) };
+console.log(option.unwrap(maybe.value));
+
+const pair: Pair<int, string> = { left: 1, right: "x" };
+console.log(pair.left);
+console.log(pair.right);
+
+const map: Map<string, int> = { keys: ["a"], values: [10] };
+console.log(map.keys[0]);
+console.log(map.values[0]);
+
+const boxes: Box<int>[] = [boxed, { value: 2 }];
+console.log(boxes[1].value);

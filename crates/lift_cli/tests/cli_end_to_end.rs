@@ -632,6 +632,31 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn generic_containers_example_runs_monomorphized_interfaces() {
+    let directory = TempDir::new("generic-containers");
+    let source = directory.path().join("generic-containers.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/generic-containers.lift"),
+    )
+    .unwrap();
+    let expected = "42\nhi\n7\n1\nx\na\n10\n2\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("generic-containers {command}"));
+    }
+    let binary = directory.path().join(binary_name("generic-containers"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário generic-containers");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn generics_example_runs_inferred_generic_functions() {
     let directory = TempDir::new("generics");
     let source = directory.path().join("generics.lift");

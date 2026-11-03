@@ -256,6 +256,22 @@ A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `S
 
 Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
 
+## Generic containers
+
+Generic interfaces describe containers monomorphized per concrete use:
+
+```lift
+interface Box<T> { value: T }
+interface Pair<A, B> { left: A, right: B }
+interface Map<K, V> { keys: K[], values: V[] }
+
+const boxed: Box<int> = { value: 41 };
+const nested: Box<Box<string>> = { value: { value: "hi" } };
+const map: Map<string, int> = { keys: ["a"], values: [10] };
+```
+
+`Name<Arg>` applications are rewritten to synthetic nominal interfaces (`Box<int>`, `Map<string, int>`) before sema; the Rust backend emits one concrete struct per instantiation. Fields can use `T` directly or inside arrays/Option/Result/nested containers. Construction requires an annotated context, and generic enums/functions over container parameters, explicit type arguments, generic methods, and FFI generic containers are not implemented. See [generic containers](docs/generic-containers.md).
+
 ## Generic functions
 
 Functions can declare type parameters inferred from each call:
@@ -381,6 +397,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/unions.lift` — `type A = B | C` unions, object-literal construction, exhaustive matching, enum members, and recursion.
 - `examples/generics.lift` — generic identity/equality/containers with inferred type parameters.
 - `examples/fnmut.lift` — mutable closure state with independent counters.
+- `examples/generic-containers.lift` — `Box<T>`, nested containers, `Pair<A,B>` and a `Map<K,V>`-shaped interface.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 
