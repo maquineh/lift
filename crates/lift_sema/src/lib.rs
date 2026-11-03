@@ -560,6 +560,17 @@ pub enum HirExprKind {
         callback: Box<HirExpr>,
         initial: Option<Box<HirExpr>>,
     },
+    /// `map.new()`: constrói um `Map<K, V>` nativo vazio no tipo esperado.
+    MapNew {
+        map_type: ResolvedType,
+    },
+    /// Operações nativas de Map (`insert`, `get`, `contains`, `len`).
+    MapMethod {
+        method: MapMethodKind,
+        map: Box<HirExpr>,
+        key: Option<Box<HirExpr>>,
+        value: Option<Box<HirExpr>>,
+    },
     /// `Enum.Variant(arg, ...)`, `Enum.Variant { campo: valor }` ou unit.
     EnumConstruct {
         enum_name: String,
@@ -630,6 +641,15 @@ pub enum HirExprKind {
     /// Proven last use of a direct owned local; codegen emits its binding.
     /// PT-BR: Último uso comprovado de local owned; codegen emite o binding.
     Move(Box<HirExpr>),
+}
+
+/// Operações nativas disponíveis em `Map<K, V>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapMethodKind {
+    Insert,
+    Get,
+    Contains,
+    Len,
 }
 
 /// Métodos higher-order disponíveis em arrays.

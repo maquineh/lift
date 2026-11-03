@@ -162,6 +162,14 @@ fn expr_uses_console(expression: &HirExpr) -> bool {
             captures.iter().any(|(_, e)| expr_uses_console(e))
                 || body.statements.iter().any(statement_uses_console)
         }
+        HirExprKind::MapNew { .. } => false,
+        HirExprKind::MapMethod {
+            map, key, value, ..
+        } => {
+            expr_uses_console(map)
+                || key.as_deref().is_some_and(expr_uses_console)
+                || value.as_deref().is_some_and(expr_uses_console)
+        }
         HirExprKind::ClosureCall { callee, arguments } => {
             expr_uses_console(callee) || arguments.iter().any(expr_uses_console)
         }
@@ -1067,6 +1075,34 @@ impl Emitter {
                 let callee = self.expression(callee);
                 let arguments = arguments.iter().map(|a| self.expression(a)).collect::<Vec<_>>().join(", ");
                 format!("({callee})({arguments})")
+            }
+            HirExprKind::MapNew { .. } => "::std::collections::BTreeMap::new()".to_owned(),
+            HirExprKind::MapMethod {
+                method,
+                map,
+                key,
+                value,
+            } => {
+                let map = self.expression(map);
+                let key = key.as_ref().map(|key| self.expression(key));
+                let value = value.as_ref().map(|value| self.expression(value));
+                match method {
+                    lift_sema::MapMethodKind::Insert => {
+                        let temporary = self.temp_name();
+                        format!(
+                            "{{ let mut {temporary} = ({map}).clone(); {temporary}.insert({}, {}); {temporary} }}",
+                            key.unwrap(),
+                            value.unwrap()
+                        )
+                    }
+                    lift_sema::MapMethodKind::Get => {
+                        format!("({map}).get(&({})).cloned()", key.unwrap())
+                    }
+                    lift_sema::MapMethodKind::Contains => {
+                        format!("({map}).contains_key(&({}))", key.unwrap())
+                    }
+                    lift_sema::MapMethodKind::Len => format!("({map}).len() as i64"),
+                }
             }
             HirExprKind::EnumConstruct {
                 enum_name,

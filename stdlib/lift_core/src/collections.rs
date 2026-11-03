@@ -2,6 +2,9 @@
 //!
 //! PT-BR: layouts externos genéricos e helpers FFI para interop de containers.
 
+/// Native generic map type exposed to Lift as `Map<K, V>`.
+pub type BTreeMap<K, V> = std::collections::BTreeMap<K, V>;
+
 /// Generic wrapper importable as `import interface Wrapper<T>`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wrapper<T> {

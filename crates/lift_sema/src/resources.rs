@@ -85,6 +85,14 @@ fn expression_uses_db(expression: &HirExpr) -> bool {
         return true;
     }
     match &expression.kind {
+        HirExprKind::MapNew { .. } => false,
+        HirExprKind::MapMethod {
+            map, key, value, ..
+        } => {
+            expression_uses_db(map)
+                || key.as_deref().is_some_and(expression_uses_db)
+                || value.as_deref().is_some_and(expression_uses_db)
+        }
         HirExprKind::Closure {
             captures,
             parameters,

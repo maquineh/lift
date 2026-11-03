@@ -178,6 +178,18 @@ impl Visitor {
             HirExprKind::Local { id, .. } => {
                 self.references.insert(*id);
             }
+            HirExprKind::MapNew { .. } => {}
+            HirExprKind::MapMethod {
+                map, key, value, ..
+            } => {
+                self.expression(map);
+                if let Some(key) = key {
+                    self.expression(key);
+                }
+                if let Some(value) = value {
+                    self.expression(value);
+                }
+            }
             HirExprKind::Closure {
                 captures,
                 parameters,

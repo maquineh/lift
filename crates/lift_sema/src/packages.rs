@@ -436,6 +436,18 @@ impl Qualifier {
         self.ty(&mut e.ty);
         match &mut e.kind {
             HirExprKind::Local { id, .. } => self.id(id),
+            HirExprKind::MapNew { map_type } => self.ty(map_type),
+            HirExprKind::MapMethod {
+                map, key, value, ..
+            } => {
+                self.expr(map);
+                if let Some(key) = key {
+                    self.expr(key);
+                }
+                if let Some(value) = value {
+                    self.expr(value);
+                }
+            }
             HirExprKind::Closure {
                 captures,
                 parameters,

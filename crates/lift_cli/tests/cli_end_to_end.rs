@@ -632,6 +632,27 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn map_example_runs_native_map_operations() {
+    let directory = TempDir::new("map");
+    let source = directory.path().join("map.lift");
+    fs::write(&source, include_str!("../../../examples/map.lift")).unwrap();
+    let expected = "1\n0\ntrue\n2\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("map {command}"));
+    }
+    let binary = directory.path().join(binary_name("map"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário map");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn generic_ffi_example_runs_external_generic_layouts() {
     let directory = TempDir::new("generic-ffi");
     let source = directory.path().join("generic-ffi.lift");

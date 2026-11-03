@@ -1,0 +1,10 @@
+// EN: Native Map<K, V> with functional insert/get/contains/len.
+// PT-BR: Map<K, V> nativo com insert/get/contains/len funcionais.
+const numbers: Map<string, int> = map.new();
+const one = numbers.insert("a", 1);
+const two = one.insert("b", 2);
+
+console.log(two.get("a") ?? 0);
+console.log(two.get("z") ?? 0);
+console.log(two.contains("b"));
+console.log(two.len());

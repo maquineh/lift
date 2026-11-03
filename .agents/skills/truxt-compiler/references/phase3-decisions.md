@@ -303,3 +303,14 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   genéricos em externos ou Map nativo.
   Testes `generic_ffi_contract.rs`, exemplo `examples/generic-ffi.lift`, docs
   `docs/generic-ffi*.md`.
+### Map nativo
+
+- O compilador injeta um template externo genérico `Map<K,V>` (source
+  `lift_core::collections::BTreeMap`) quando o usuário não declara `Map`.
+  O monomorfizador gera o layout externo concreto.
+- HIR `MapNew`/`MapMethod`; `map.new` exige contexto `Map<K,V>`; métodos
+  `insert` (funcional clone+insert), `get` (Option<V>), `contains`, `len`.
+  Codegen usa `std::collections::BTreeMap`.
+- Chaves `int`/`string`/`boolean` (sem `number`, sem Ord); valores
+  primitivos/string/boolean. Sem remove/iteração/Map FFI.
+  Testes `map_contract.rs`, exemplo `examples/map.lift`, docs `docs/map*.md`.

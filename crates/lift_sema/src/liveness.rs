@@ -374,6 +374,18 @@ fn observe_conditional(conditional: &HirIf, node: &mut Node) {
 
 fn observe(expression: &HirExpr, node: &mut Node) {
     match &expression.kind {
+        HirExprKind::MapNew { .. } => {}
+        HirExprKind::MapMethod {
+            map, key, value, ..
+        } => {
+            observe(map, node);
+            if let Some(key) = key {
+                observe(key, node);
+            }
+            if let Some(value) = value {
+                observe(value, node);
+            }
+        }
         HirExprKind::Closure { captures, .. } => {
             for (_, value) in captures {
                 observe(value, node);

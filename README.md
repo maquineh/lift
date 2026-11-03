@@ -256,6 +256,20 @@ A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `S
 
 Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
 
+## Native Map
+
+`Map<K, V>` is built in, backed by `BTreeMap`:
+
+```lift
+const numbers: Map<string, int> = map.new();
+const two = numbers.insert("a", 1).insert("b", 2);
+console.log(two.get("a") ?? 0); // 1
+console.log(two.contains("b")); // true
+console.log(two.len());         // 2
+```
+
+`insert` is functional (clone+insert), `get` returns `V?`, and keys are ordered primitives/strings/booleans (`number` keys rejected). Values are restricted to primitives/strings/booleans. No remove/iteration/FFI Map yet. See [native Map](docs/map.md).
+
 ## Generic external layouts (FFI)
 
 Imported interfaces can be generic; each application maps to an external Rust layout:
@@ -473,6 +487,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/generic-container-functions.lift` — specialization of `unwrap<T>(Box<T>)` and nested container calls.
 - `examples/generic-impls.lift` — generic `impl Box<T>` methods specialized for `Box<int>`/`Box<string>`.
 - `examples/generic-ffi.lift` — imported `Wrapper<T>` layouts crossing the FFI for int and string.
+- `examples/map.lift` — native `Map<string, int>` with insert/get/contains/len.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

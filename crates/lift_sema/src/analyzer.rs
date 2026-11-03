@@ -18,13 +18,54 @@ use crate::{
     HirExternStruct, HirForOf, HirFunction, HirIf, HirImport, HirMatch, HirMatchArm,
     HirMatchBinding, HirMatchPattern, HirNarrowing, HirParameter, HirProgram, HirReturn,
     HirStatement, HirStruct, HirStructField, HirStructInitField, HirThrow, HirTryCatch,
-    HirVariableDeclaration, HirWhile, LoopId, ParameterPassMode, PropagateTarget, ResolvedType,
-    RustDependency, SemaError, SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN, OPTION_IS_SOME_BUILTIN,
-    OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN, RESULT_UNWRAP_ERR_BUILTIN,
+    HirVariableDeclaration, HirWhile, LoopId, MapMethodKind, ParameterPassMode, PropagateTarget,
+    ResolvedType, RustDependency, SemaError, SemaErrorKind, TryId, CONSOLE_LOG_BUILTIN,
+    OPTION_IS_SOME_BUILTIN, OPTION_UNWRAP_BUILTIN, RESULT_IS_OK_BUILTIN, RESULT_UNWRAP_BUILTIN,
+    RESULT_UNWRAP_ERR_BUILTIN,
 };
 
 fn method_name(target: &str, method: &str) -> String {
     format!("$method:{target}:{method}")
+}
+
+fn inject_builtin_map(ast: &mut ProgramAst) {
+    if ast
+        .declarations
+        .iter()
+        .any(|declaration| match declaration {
+            Declaration::Interface(interface) => interface.name.name == "Map",
+            Declaration::Enum(enumeration) => enumeration.name.name == "Map",
+            Declaration::Union(union) => union.name.name == "Map",
+            Declaration::ImportInterface(interface) => interface.name.name == "Map",
+            _ => false,
+        })
+    {
+        return;
+    }
+    let span = Span::default();
+    ast.declarations.push(Declaration::ImportInterface(
+        lift_ast::ImportInterfaceDeclaration {
+            name: Identifier {
+                name: "Map".into(),
+                span,
+            },
+            type_parameters: vec![
+                Identifier {
+                    name: "K".into(),
+                    span,
+                },
+                Identifier {
+                    name: "V".into(),
+                    span,
+                },
+            ],
+            type_arguments: Vec::new(),
+            fields: Vec::new(),
+            source: "lift_core::collections::BTreeMap".into(),
+            source_span: span,
+            span,
+        },
+    ));
 }
 
 fn lower_impls(mut ast: ProgramAst) -> Result<ProgramAst, Vec<SemaError>> {
@@ -312,6 +353,7 @@ pub(super) fn analyze_context(
     external: HashMap<String, FunctionInfo>,
 ) -> Result<HirProgram, Vec<SemaError>> {
     let mut ast = ast;
+    inject_builtin_map(&mut ast);
     let mut generic_errors = Vec::new();
     crate::generic_function_specialization::specialize_generic_functions(
         &mut ast,
@@ -2455,6 +2497,44 @@ impl<'a> BodyChecker<'a> {
             }
             if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
                 if let ExpressionKind::Identifier(base) = &access.object.kind {
+                    if base.name == "map" && access.field.name == "new" {
+                        if let ResolvedType::Struct(instance) = expected {
+                            if let Some((key, _)) = map_types(instance) {
+                                if self
+                                    .structures
+                                    .get(instance)
+                                    .is_some_and(|structure| structure.external)
+                                {
+                                    if key == ResolvedType::Number {
+                                        return Err(SemaError::new(
+                                            SemaErrorKind::UnsupportedType,
+                                            "Map não aceita `number` como chave (sem Ord)",
+                                            expression.span,
+                                        ));
+                                    }
+                                    if !call.arguments.is_empty() {
+                                        return Err(SemaError::new(
+                                            SemaErrorKind::ArgumentCountMismatch,
+                                            "`map.new` não recebe argumentos",
+                                            expression.span,
+                                        ));
+                                    }
+                                    return Ok(self.expr(
+                                        HirExprKind::MapNew {
+                                            map_type: expected.clone(),
+                                        },
+                                        expected.clone(),
+                                        expression.span,
+                                    ));
+                                }
+                            }
+                        }
+                        return Err(SemaError::new(
+                            SemaErrorKind::UnsupportedType,
+                            "`map.new` exige contexto `Map<K, V>`",
+                            expression.span,
+                        ));
+                    }
                     if let ResolvedType::Struct(instance) = expected {
                         if instance.starts_with(&format!("{}<", base.name))
                             && self.enums.contains_key(instance)
@@ -3456,6 +3536,86 @@ impl<'a> BodyChecker<'a> {
         ))
     }
 
+    fn check_map_method(
+        &mut self,
+        span: Span,
+        map_name: &str,
+        method_name: &str,
+        map: HirExpr,
+        call: &lift_ast::CallExpression,
+    ) -> Result<HirExpr, SemaError> {
+        let Some((key_type, value_type)) = map_types(map_name) else {
+            return Err(SemaError::new(
+                SemaErrorKind::UnknownType,
+                format!("`{map_name}` não é um Map nativo"),
+                span,
+            ));
+        };
+        if key_type == ResolvedType::Number {
+            return Err(SemaError::new(
+                SemaErrorKind::UnsupportedType,
+                "Map não aceita `number` como chave (sem Ord)",
+                span,
+            ));
+        }
+        let method = match method_name {
+            "insert" => MapMethodKind::Insert,
+            "get" => MapMethodKind::Get,
+            "contains" => MapMethodKind::Contains,
+            "len" => MapMethodKind::Len,
+            _ => {
+                return Err(SemaError::new(
+                    SemaErrorKind::UnknownField,
+                    format!("Map não tem método `{method_name}`"),
+                    span,
+                ));
+            }
+        };
+        let expected = match method {
+            MapMethodKind::Insert => 2,
+            MapMethodKind::Get | MapMethodKind::Contains => 1,
+            MapMethodKind::Len => 0,
+        };
+        if call.arguments.len() != expected {
+            return Err(SemaError::new(
+                SemaErrorKind::ArgumentCountMismatch,
+                format!("`map.{method_name}` espera {expected} argumento(s)"),
+                span,
+            ));
+        }
+        let key = if matches!(
+            method,
+            MapMethodKind::Insert | MapMethodKind::Get | MapMethodKind::Contains
+        ) {
+            let value = self.check_expr(&call.arguments[0], &key_type)?;
+            Some(Box::new(self.materialize_owned(value, false)))
+        } else {
+            None
+        };
+        let value = if method == MapMethodKind::Insert {
+            let value = self.check_expr(&call.arguments[1], &value_type)?;
+            Some(Box::new(self.materialize_owned(value, false)))
+        } else {
+            None
+        };
+        let ty = match method {
+            MapMethodKind::Insert => ResolvedType::Struct(map_name.to_owned()),
+            MapMethodKind::Get => ResolvedType::Optional(Box::new(value_type)),
+            MapMethodKind::Contains => ResolvedType::Boolean,
+            MapMethodKind::Len => ResolvedType::Int,
+        };
+        Ok(self.expr(
+            HirExprKind::MapMethod {
+                method,
+                map: Box::new(map),
+                key,
+                value,
+            },
+            ty,
+            span,
+        ))
+    }
+
     /// Métodos higher-order de array (`map`, `filter`, `forEach`, `find`,
     /// `some`, `every`, `reduce`), monomorfizados pelo tipo do elemento.
     /// PT-BR: métodos de array com callback, sem generics Lift.
@@ -4208,7 +4368,21 @@ impl<'a> BodyChecker<'a> {
             if let ResolvedType::Array(element) = receiver.ty.clone() {
                 return self.check_array_method(span, &access.field.name, receiver, *element, call);
             }
-            if let ResolvedType::Struct(target) = receiver.ty {
+            if let ResolvedType::Struct(target) = receiver.ty.clone() {
+                if self
+                    .structures
+                    .get(&target)
+                    .is_some_and(|structure| structure.external)
+                    && map_types(&target).is_some()
+                {
+                    return self.check_map_method(
+                        span,
+                        &target,
+                        &access.field.name,
+                        receiver,
+                        call,
+                    );
+                }
                 let name = method_name(&target, &access.field.name);
                 let mut arguments = vec![(*access.object).clone()];
                 arguments.extend(call.arguments.clone());
@@ -5293,6 +5467,18 @@ fn place_projection_conflicts(expression: &HirExpr, root: BindingId) -> bool {
 
 fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<BindingId>) {
     match &expression.kind {
+        HirExprKind::MapNew { .. } => {}
+        HirExprKind::MapMethod {
+            map, key, value, ..
+        } => {
+            collect_nested_mut_borrow_roots(map, roots);
+            if let Some(key) = key {
+                collect_nested_mut_borrow_roots(key, roots);
+            }
+            if let Some(value) = value {
+                collect_nested_mut_borrow_roots(value, roots);
+            }
+        }
         HirExprKind::Closure { captures, .. } => {
             for (_, value) in captures {
                 collect_nested_mut_borrow_roots(value, roots);
@@ -5393,6 +5579,8 @@ fn collect_nested_mut_borrow_roots(expression: &HirExpr, roots: &mut HashSet<Bin
 
 fn hir_contains_call(expression: &HirExpr) -> bool {
     match &expression.kind {
+        HirExprKind::MapNew { .. } => false,
+        HirExprKind::MapMethod { .. } => true,
         HirExprKind::Closure { captures, .. } => {
             captures.iter().any(|(_, value)| hir_contains_call(value))
         }
@@ -5455,6 +5643,18 @@ fn hir_contains_call(expression: &HirExpr) -> bool {
 
 fn collect_hir_binding_uses(expression: &HirExpr, uses: &mut HashSet<BindingId>) {
     match &expression.kind {
+        HirExprKind::MapNew { .. } => {}
+        HirExprKind::MapMethod {
+            map, key, value, ..
+        } => {
+            collect_hir_binding_uses(map, uses);
+            if let Some(key) = key {
+                collect_hir_binding_uses(key, uses);
+            }
+            if let Some(value) = value {
+                collect_hir_binding_uses(value, uses);
+            }
+        }
         HirExprKind::Closure { captures, .. } => {
             for (_, value) in captures {
                 collect_hir_binding_uses(value, uses);
@@ -6243,5 +6443,21 @@ fn apply_mutable_binding_flags(declarations: &mut [HirDeclaration], mutable: &Ha
             | HirDeclaration::ExternStruct(_)
             | HirDeclaration::Import(_) => {}
         }
+    }
+}
+
+fn map_types(name: &str) -> Option<(ResolvedType, ResolvedType)> {
+    let inner = name.strip_prefix("Map<")?.strip_suffix('>')?;
+    let (key, value) = inner.split_once(", ")?;
+    Some((simple_map_type(key)?, simple_map_type(value)?))
+}
+
+fn simple_map_type(name: &str) -> Option<ResolvedType> {
+    match name {
+        "int" => Some(ResolvedType::Int),
+        "number" => Some(ResolvedType::Number),
+        "string" => Some(ResolvedType::String),
+        "boolean" => Some(ResolvedType::Boolean),
+        _ => None,
     }
 }
