@@ -256,6 +256,20 @@ A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `S
 
 Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
 
+## Generic functions over containers
+
+Generic functions whose signatures use containers are specialized through explicit type arguments:
+
+```lift
+interface Box<T> { value: T }
+function unwrap<T>(box: Box<T>): T { return box.value; }
+
+const boxed: Box<int> = { value: 41 };
+console.log(unwrap::<int>(boxed));
+```
+
+Each `f::<Args>` generates a concrete copy (`unwrap<int>`) with `T` substituted in the signature/body; nested explicit calls are specialized recursively. Calls without explicit arguments are rejected because the template is removed. See [generic functions over containers](docs/generic-container-functions.md).
+
 ## Explicit type arguments
 
 Generic calls can pin their type parameters with `::<...>`:
@@ -427,6 +441,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/capture-fields.lift` — field and method mutation of captured structs.
 - `examples/generic-enums.lift` — `Maybe<T>`, recursive `List<T>`, named generic variants and matching.
 - `examples/explicit-type-arguments.lift` — `identity::<int>`, `first::<Box<int>>` and explicit container arguments.
+- `examples/generic-container-functions.lift` — specialization of `unwrap<T>(Box<T>)` and nested container calls.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

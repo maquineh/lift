@@ -265,3 +265,15 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   monomorfizador.
 - Testes `explicit_type_arguments_contract.rs`, exemplo
   `examples/explicit-type-arguments.lift`, docs `docs/explicit-type-arguments*.md`.
+### Funções genéricas sobre containers (especialização explícita)
+
+- `generic_function_specialization` roda antes do monomorfizador de containers.
+  Detecta funções genéricas cuja assinatura contém `Generic` e coleta chamadas
+  explícitas `f::<Args>`; gera cópias concretas com `T` substituído na assinatura,
+  anotações locais, closures e chamadas aninhadas, nomeadas `f<Args>`.
+- O template original é removido; chamadas sem argumentos explícitos viram
+  `UnknownFunction`. A cópia concreta passa pelo monomorfizador de containers.
+- Limite: especialização explícita apenas; sem métodos/impl genéricos, FFI
+  genérica ou Map nativo. Testes `generic_container_functions_contract.rs`,
+  exemplo `examples/generic-container-functions.lift`, docs
+  `docs/generic-container-functions*.md`.

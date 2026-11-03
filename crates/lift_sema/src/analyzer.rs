@@ -313,6 +313,10 @@ pub(super) fn analyze_context(
 ) -> Result<HirProgram, Vec<SemaError>> {
     let mut ast = lower_impls(ast)?;
     let mut generic_errors = Vec::new();
+    crate::generic_function_specialization::specialize_generic_functions(
+        &mut ast,
+        &mut generic_errors,
+    );
     crate::generic_containers::expand_generic_containers(&mut ast, &mut generic_errors);
     if !generic_errors.is_empty() {
         return Err(generic_errors);

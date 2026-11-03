@@ -1,0 +1,15 @@
+// EN: Generic functions over containers via explicit specialization.
+// PT-BR: Funções genéricas sobre containers via especialização explícita.
+interface Box<T> { value: T }
+
+function unwrap<T>(box: Box<T>): T { return box.value; }
+
+function unwrapTwice<T>(box: Box<Box<T>>): T {
+    return unwrap::<Box<T>>(box).value;
+}
+
+const boxed: Box<int> = { value: 41 };
+console.log(unwrap::<int>(boxed));
+
+const nested: Box<Box<string>> = { value: { value: "hi" } };
+console.log(unwrapTwice::<string>(nested));

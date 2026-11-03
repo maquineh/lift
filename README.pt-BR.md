@@ -256,6 +256,20 @@ Uma variante é construída com `Shape.Circle(2.0)`, uma variante com campos nom
 
 Closures podem mutar variáveis `let` capturadas; o Rust gerado armazena essas captures em `Rc<RefCell<T>>`, mantendo estado entre chamadas sem mudar o tipo de callback `Rc<dyn Fn>`. As captures continuam snapshots: mutações não atualizam a variável externa, então use o retorno da closure, `reduce` ou `for...of` para acumular fora. Veja [captures mutáveis](docs/fnmut.pt-BR.md).
 
+## Funções genéricas sobre containers
+
+Funções genéricas cujas assinaturas usam containers são especializadas por argumentos explícitos:
+
+```lift
+interface Box<T> { value: T }
+function unwrap<T>(box: Box<T>): T { return box.value; }
+
+const boxed: Box<int> = { value: 41 };
+console.log(unwrap::<int>(boxed));
+```
+
+Cada `f::<Args>` gera uma cópia concreta (`unwrap<int>`) com `T` substituído na assinatura/corpo; chamadas explícitas aninhadas são especializadas recursivamente. Chamadas sem argumentos explícitos são rejeitadas porque o template é removido. Veja [funções genéricas sobre containers](docs/generic-container-functions.pt-BR.md).
+
 ## Argumentos de tipo explícitos
 
 Chamadas genéricas podem fixar parâmetros de tipo com `::<...>`:
@@ -395,7 +409,7 @@ O arquivo resultante contém `Olá da entrada padrão|exemplo`. Ao executar inte
 - Matching cobre `Option`/`Result` e enums nominais; wildcards, guardas, patterns aninhados e tipos union TypeScript não foram implementados.
 - Enums suportam payloads posicionais/nomeados, recursão via `Box` automático, campos de interface e uniões `type A = B | C`; enums em FFI, discriminantes explícitos e métodos em enums não foram implementados.
 - Uniões exigem membros nominais interface/enum/union; membros primitivos/array/Option, tipos union inline, declarações alias e narrowing por discriminante não foram implementados.
-- Genéricos cobrem funções inferidas, interfaces containers, enums genéricos monomorfizados e argumentos explícitos; funções genéricas sobre `Box<T>`, métodos genéricos, callbacks/FFI genéricos, containers genéricos em FFI e API nativa de Map não foram implementados.
+- Genéricos cobrem funções inferidas, interfaces containers, enums genéricos, argumentos explícitos e funções sobre containers via especialização explícita; métodos genéricos, callbacks/FFI genéricos, containers genéricos em FFI e API nativa de Map não foram implementados.
 - O [serviço local de notas](examples/notes-service/README.pt-BR.md) declara DTOs, handlers síncronos, rotas e SQL em Lift. A [API de banco](stdlib/lift_db/README.pt-BR.md) oferece pools SQLite/PostgreSQL configuráveis, execute/query parametrizado, resultados materializados e transações owned. O servidor possui o pool e os handlers o emprestam.
 
 O serviço exercita os contratos documentados de SQL/escalares e HTTP estático. Consulte o [plano de compatibilidade de banco](docs/database-compatibility.pt-BR.md) para a matriz de backends/versões e o [contrato de callbacks/HTTP](docs/callbacks-and-web-contract.pt-BR.md) para limites do adaptador.
@@ -427,6 +441,7 @@ O serviço exercita os contratos documentados de SQL/escalares e HTTP estático.
 - `examples/capture-fields.lift` — mutação de campo e método em structs capturadas.
 - `examples/generic-enums.lift` — `Maybe<T>`, `List<T>` recursivo, variantes nomeadas genéricas e matching.
 - `examples/explicit-type-arguments.lift` — `identity::<int>`, `first::<Box<int>>` e argumentos explícitos de container.
+- `examples/generic-container-functions.lift` — especialização de `unwrap<T>(Box<T>)` e chamadas aninhadas de container.
 - `examples/notes-service/main.lift` — inicia o serviço local HTTP/SQLite da PoC.
 - `examples/notes-service/db-smoke.lift` — exercita `save_note` e `list_notes` pela FFI segura.
 
