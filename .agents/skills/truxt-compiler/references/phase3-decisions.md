@@ -289,3 +289,17 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   métodos genéricos aninhados, FFI genérica ou Map nativo.
   Testes `generic_impls_contract.rs`, exemplo `examples/generic-impls.lift`,
   docs `docs/generic-impls*.md`.
+### Layouts externos genéricos (FFI)
+
+- `ImportInterfaceDeclaration` ganhou `type_parameters`/`type_arguments`.
+  O monomorfizador coleta templates de import genérico, remove-os e gera
+  declarações externas sintéticas (`Wrapper<int>`) com campos substituídos.
+- `resolve_import_interface` anexa argumentos Rust ao caminho
+  (`Wrapper<i64>`, `Wrapper<String>`) usando apenas primitivos/string/bool;
+  outros tipos são rejeitados. O restante flui pela validação FFI existente.
+- `lift_core::collections::Wrapper<T>` + helpers fornecem exemplo E2E; o CLI
+  passou a embutir `collections.rs` no core.
+- Limites: sem construção de externos genéricos, funções FFI genéricas, impls
+  genéricos em externos ou Map nativo.
+  Testes `generic_ffi_contract.rs`, exemplo `examples/generic-ffi.lift`, docs
+  `docs/generic-ffi*.md`.

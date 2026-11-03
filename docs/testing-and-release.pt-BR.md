@@ -16,6 +16,7 @@ completa com TypeScript nem com toda crate Rust.
 | Option e Result | `option_contract.rs`, `semantic_contract.rs`; E2E de coalesce, campos opcionais, narrowing, I/O, unwrap, Option direto no FFI e parâmetro Result emprestado em `cli_end_to_end.rs` | tipos inválidos, fallback eager, unwrap da variante incorreta, mutação através de valor estreitado, `let`/projeções não estreitáveis, campos opcionais aninhados, narrowing dentro da própria condição e Option aninhado em arrays ou Option<Result> |
 | Erros e propagação | `errors_contract.rs`; `examples/errors.lift` via check/build/run em `cli_end_to_end.rs` | construtores sem contexto ou com aridade errada, `?`/`throw` sem alvo compatível ou com tipo de erro divergente, `?` em Option, catch sombreado ou com tipo `void` e falta de retorno após `try` que pode terminar normalmente |
 | Captures mutáveis | marcador de mutação em `enum_contract.rs`; E2E `examples/fnmut.lift` e `examples/capture-fields.lift` | mutação de variável/campo/método, estado `Copy` compartilhado, snapshots não-`Copy` isolados e estado persistente |
+| Layouts externos genéricos | `generic_ffi_contract.rs`; E2E `examples/generic-ffi.lift` | template de import genérico, mapeamento de argumentos no caminho Rust, instanciações primitivas/string, argumentos complexos rejeitados |
 | Métodos de impl genérico | `generic_impls_contract.rs`; E2E `examples/generic-impls.lift` | especialização por aplicação, mutação de `this`, múltiplas instanciações, alvos desconhecidos |
 | Funções genéricas sobre containers | `generic_container_functions_contract.rs`; E2E `examples/generic-container-functions.lift` | especialização explícita, chamadas aninhadas, substituição, chamadas sem argumentos explícitos rejeitadas |
 | Argumentos de tipo explícitos | `explicit_type_arguments_contract.rs`; E2E `examples/explicit-type-arguments.lift` | aridade, conflito com argumentos reais, callee não-genérico, uso como valor, argumentos container/enum |
@@ -47,7 +48,7 @@ deve ser interpretado como prontidão diária para código TypeScript arbitrári
 | Recurso | Estado atual | Aceite necessário depois da implementação |
 | --- | --- | --- |
 | Generics gerais | `Result<T, E>` é um tipo especial; não há parâmetros de tipo genéricos gerais. | declaração, instanciação, chamadas e tipos aninhados válidos; aridade e combinações inválidas rejeitadas antes do Rust. |
-| Containers FFI e Map | Impls/funções genéricas funcionam por especialização, mas containers genéricos em FFI e API nativa de Map estão ausentes. | containers FFI e APIs Map rejeitados. |
+| Map nativo | Layouts externos genéricos são suportados, mas uma API nativa de Map está ausente. | APIs Map rejeitadas. |
 | Pattern matching geral | Lift tem `match` para `Option<T>`, `Result<T, E>` e enums nominais, com patterns fixos. Primitivos, guardas, wildcards, patterns aninhados e expressões `match` estão ausentes. | matching de todos os tipos algébricos aceitos, cobertura exaustiva, arms inalcançáveis/duplicados, guardas/aninhamento e comportamento executado. |
 
 

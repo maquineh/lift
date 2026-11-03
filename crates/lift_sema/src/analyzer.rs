@@ -973,6 +973,34 @@ impl<'ast> Analyzer<'ast> {
                     return;
                 }
             };
+        let rust_path = if interface.type_arguments.is_empty() {
+            rust_path
+        } else {
+            let mut arguments = Vec::new();
+            for argument in &interface.type_arguments {
+                match resolve_type(argument, names, &HashSet::new(), TypePosition::Field) {
+                    Ok(ResolvedType::Int) => arguments.push("i64".to_owned()),
+                    Ok(ResolvedType::Number) => arguments.push("f64".to_owned()),
+                    Ok(ResolvedType::String) => arguments.push("String".to_owned()),
+                    Ok(ResolvedType::Boolean) => arguments.push("bool".to_owned()),
+                    Ok(other) => {
+                        self.errors.push(SemaError::new(
+                            SemaErrorKind::UnsupportedType,
+                            format!(
+                                "argumento `{other}` não é suportado em interface externa genérica"
+                            ),
+                            argument.span,
+                        ));
+                        return;
+                    }
+                    Err(error) => {
+                        self.errors.push(error);
+                        return;
+                    }
+                }
+            }
+            format!("{rust_path}<{}>", arguments.join(", "))
+        };
         let crate_name = rust_path.split("::").next().unwrap_or_default().to_owned();
         if let Some((previous, previous_span)) = self.extern_dependencies.get(&crate_name) {
             if previous != &dependency {

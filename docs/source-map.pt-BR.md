@@ -79,6 +79,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `crates/lift_sema/tests/liveness_contract.rs` | Elegibilidade e contraexemplos conservadores em joins, retornos, loops, reatribuições, chamadas, parâmetros emprestados e projeções. |
 | `crates/lift_sema/tests/option_contract.rs` | Tipos/null, modos de coalesce lazy, campos opcionais obrigatórios versus omitíveis, narrowing de fluxo (ramos, guardas, else-if, loops, captures, mutações rejeitadas), limites de inferência, ciclos, rejeição de FFI aninhada/struct local e ownership conservador. |
 | `crates/lift_sema/tests/ffi_structs_options_contract.rs` | Resolução de layouts externos e dependências, validação de campo/tipo, aceite e rejeição de structs/Option/Result no FFI e modos de parâmetro emprestados. |
+| `crates/lift_sema/tests/generic_ffi_contract.rs` | Interfaces importadas genéricas, caminhos Rust monomorfizados, campos substituídos e rejeição de argumentos complexos. |
 | `crates/lift_sema/tests/generic_impls_contract.rs` | Coleta de impl genérico, especialização por aplicação, substituição de métodos e rejeição de alvo desconhecido. |
 | `crates/lift_sema/tests/generic_container_functions_contract.rs` | Especialização explícita de funções genéricas sobre containers, chamadas aninhadas, substituição e rejeição sem argumentos explícitos. |
 | `crates/lift_sema/tests/explicit_type_arguments_contract.rs` | Parsing `::<T>`, instanciação explícita, argumentos container e regras de rejeição. |
@@ -105,6 +106,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays e campos opcionais (omitidos e explícitos), narrowing entre guardas e loops e preservação de origens. |
 | `examples/capture-fields.lift` | Mutação de campo/método em structs capturadas via `Rc<RefCell<T>>`. |
 | `examples/fnmut.lift` | Captures mutáveis de closure com estado persistente independente. |
+| `examples/generic-ffi.lift` | Layouts `Wrapper<T>` importados cruzando a FFI. |
 | `examples/generic-impls.lift` | Métodos de `impl Box<T>` especializados para containers concretos. |
 | `examples/generic-container-functions.lift` | Especialização de funções sobre containers e chamadas aninhadas. |
 | `examples/explicit-type-arguments.lift` | Chamadas genéricas explícitas com argumentos primitivos e de container. |

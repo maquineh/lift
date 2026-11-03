@@ -256,6 +256,18 @@ A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `S
 
 Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
 
+## Generic external layouts (FFI)
+
+Imported interfaces can be generic; each application maps to an external Rust layout:
+
+```lift
+import interface Wrapper<T> { value: T } from "lift_core::collections::Wrapper";
+import function wrap_i64(value: int): Wrapper<int> from "lift_core::collections::wrap_i64";
+import function unwrap_i64(wrapper: Wrapper<int>): int from "lift_core::collections::unwrap_i64";
+```
+
+`Wrapper<int>` becomes `lift_core::collections::Wrapper<i64>` with substituted fields. Type arguments are limited to `int`, `number`, `string`, and `boolean`; no construction of external layouts, generic FFI functions, or nested container arguments. See [generic external layouts](docs/generic-ffi.md).
+
 ## Generic impl methods
 
 `impl Box<T>` methods are specialized for every concrete application:
@@ -460,6 +472,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/explicit-type-arguments.lift` — `identity::<int>`, `first::<Box<int>>` and explicit container arguments.
 - `examples/generic-container-functions.lift` — specialization of `unwrap<T>(Box<T>)` and nested container calls.
 - `examples/generic-impls.lift` — generic `impl Box<T>` methods specialized for `Box<int>`/`Box<string>`.
+- `examples/generic-ffi.lift` — imported `Wrapper<T>` layouts crossing the FFI for int and string.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

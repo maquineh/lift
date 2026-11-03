@@ -15,6 +15,7 @@ use crate::{SemaError, SemaErrorKind};
 pub(super) fn expand_generic_containers(ast: &mut ProgramAst, errors: &mut Vec<SemaError>) {
     let mut interface_templates = HashMap::new();
     let mut enum_templates = HashMap::new();
+    let mut import_templates = HashMap::new();
     for declaration in &ast.declarations {
         match declaration {
             Declaration::Interface(interface) if !interface.type_parameters.is_empty() => {
@@ -25,24 +26,31 @@ pub(super) fn expand_generic_containers(ast: &mut ProgramAst, errors: &mut Vec<S
                 validate_parameters(&enumeration.name, &enumeration.type_parameters, errors);
                 enum_templates.insert(enumeration.name.name.clone(), enumeration.clone());
             }
+            Declaration::ImportInterface(interface) if !interface.type_parameters.is_empty() => {
+                validate_parameters(&interface.name, &interface.type_parameters, errors);
+                import_templates.insert(interface.name.name.clone(), interface.clone());
+            }
             _ => {}
         }
     }
-    if interface_templates.is_empty() && enum_templates.is_empty() {
+    if interface_templates.is_empty() && enum_templates.is_empty() && import_templates.is_empty() {
         return;
     }
 
     ast.declarations.retain(|declaration| match declaration {
         Declaration::Interface(interface) => interface.type_parameters.is_empty(),
         Declaration::Enum(enumeration) => enumeration.type_parameters.is_empty(),
+        Declaration::ImportInterface(interface) => interface.type_parameters.is_empty(),
         _ => true,
     });
 
     let mut monomorphizer = Monomorphizer {
         interface_templates,
         enum_templates,
+        import_templates,
         generated_interfaces: HashMap::new(),
         generated_enums: HashMap::new(),
+        generated_imports: HashMap::new(),
         order: Vec::new(),
         errors,
     };
@@ -59,6 +67,12 @@ pub(super) fn expand_generic_containers(ast: &mut ProgramAst, errors: &mut Vec<S
             GeneratedKind::Enum => {
                 if let Some(enumeration) = monomorphizer.generated_enums.remove(&name) {
                     ast.declarations.push(Declaration::Enum(enumeration));
+                }
+            }
+            GeneratedKind::ImportInterface => {
+                if let Some(interface) = monomorphizer.generated_imports.remove(&name) {
+                    ast.declarations
+                        .push(Declaration::ImportInterface(interface));
                 }
             }
         }
@@ -85,13 +99,16 @@ fn validate_parameters(name: &Identifier, parameters: &[Identifier], errors: &mu
 enum GeneratedKind {
     Interface,
     Enum,
+    ImportInterface,
 }
 
 struct Monomorphizer<'a> {
     interface_templates: HashMap<String, InterfaceDeclaration>,
     enum_templates: HashMap<String, lift_ast::EnumDeclaration>,
+    import_templates: HashMap<String, lift_ast::ImportInterfaceDeclaration>,
     generated_interfaces: HashMap<String, InterfaceDeclaration>,
     generated_enums: HashMap<String, lift_ast::EnumDeclaration>,
+    generated_imports: HashMap<String, lift_ast::ImportInterfaceDeclaration>,
     order: Vec<(String, GeneratedKind)>,
     errors: &'a mut Vec<SemaError>,
 }
@@ -417,6 +434,60 @@ impl Monomorphizer<'_> {
                         }
                         if let Some(generated) = self.generated_enums.get_mut(&canonical) {
                             generated.variants = variants;
+                        }
+                    }
+                    ty.kind = TypeExpressionKind::Named(Identifier {
+                        name: canonical,
+                        span: name.span,
+                    });
+                } else if let Some(template) = self.import_templates.get(&name.name).cloned() {
+                    if template.type_parameters.len() != arguments.len() {
+                        self.errors.push(SemaError::new(
+                            SemaErrorKind::ArgumentCountMismatch,
+                            format!(
+                                "interface externa genérica `{}` espera {} argumento(s) de tipo, recebeu {}",
+                                name.name,
+                                template.type_parameters.len(),
+                                arguments.len()
+                            ),
+                            ty.span,
+                        ));
+                        return;
+                    }
+                    let canonical = canonical_name(&name.name, arguments);
+                    if !self.generated_imports.contains_key(&canonical) {
+                        self.generated_imports.insert(
+                            canonical.clone(),
+                            lift_ast::ImportInterfaceDeclaration {
+                                name: Identifier {
+                                    name: canonical.clone(),
+                                    span: name.span,
+                                },
+                                type_parameters: Vec::new(),
+                                type_arguments: arguments.clone(),
+                                fields: Vec::new(),
+                                source: template.source.clone(),
+                                source_span: template.source_span,
+                                span: template.span,
+                            },
+                        );
+                        self.order
+                            .push((canonical.clone(), GeneratedKind::ImportInterface));
+                        let substitutions = substitutions(&template.type_parameters, arguments);
+                        let mut fields = template
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                let mut field = field.clone();
+                                field.ty = substitute(&field.ty, &substitutions);
+                                field
+                            })
+                            .collect::<Vec<_>>();
+                        for field in &mut fields {
+                            self.ty(&mut field.ty);
+                        }
+                        if let Some(generated) = self.generated_imports.get_mut(&canonical) {
+                            generated.fields = fields;
                         }
                     }
                     ty.kind = TypeExpressionKind::Named(Identifier {

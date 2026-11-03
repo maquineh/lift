@@ -37,6 +37,10 @@ const EMBEDDED_CORE_FILES: &[(&str, &str)] = &[
         include_str!("../../../stdlib/lift_core/src/array.rs"),
     ),
     (
+        "src/collections.rs",
+        include_str!("../../../stdlib/lift_core/src/collections.rs"),
+    ),
+    (
         "src/console.rs",
         include_str!("../../../stdlib/lift_core/src/console.rs"),
     ),

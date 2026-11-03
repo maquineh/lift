@@ -10,6 +10,7 @@
 //! compatíveis com o mapeamento de tipos FFI do compilador podem ser importadas.
 
 pub mod array;
+pub mod collections;
 mod console;
 pub mod interop;
 pub mod io;

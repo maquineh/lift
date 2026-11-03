@@ -130,6 +130,10 @@ pub struct ImportFunctionDeclaration {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportInterfaceDeclaration {
     pub name: Identifier,
+    /// Parâmetros de tipo do layout externo genérico (`import interface Box<T>`).
+    pub type_parameters: Vec<Identifier>,
+    /// Argumentos de tipo concretos da instância sintética (`Box<int>`).
+    pub type_arguments: Vec<TypeExpression>,
     pub fields: Vec<InterfaceField>,
     pub source: String,
     pub source_span: Span,

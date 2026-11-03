@@ -632,6 +632,27 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn generic_ffi_example_runs_external_generic_layouts() {
+    let directory = TempDir::new("generic-ffi");
+    let source = directory.path().join("generic-ffi.lift");
+    fs::write(&source, include_str!("../../../examples/generic-ffi.lift")).unwrap();
+    let expected = "41\nhi\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("generic-ffi {command}"));
+    }
+    let binary = directory.path().join(binary_name("generic-ffi"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário generic-ffi");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn generic_impls_example_runs_specialized_methods() {
     let directory = TempDir::new("generic-impls");
     let source = directory.path().join("generic-impls.lift");
