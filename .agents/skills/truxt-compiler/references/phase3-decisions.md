@@ -238,3 +238,18 @@ Contrato público: `docs/enums*.md`; exemplo `examples/enums.lift`; teste
   ainda não entram nessa cadeia. As antigas rejeições de captura não-`Copy` e de
   mutação de campo foram removidas; testes antigos ajustados.
 - Exemplo `examples/capture-fields.lift`, E2E, docs `docs/fnmut*.md`.
+### Enums genéricos monomorfizados
+
+- `EnumDeclaration.type_parameters` no AST/parser; o monomorfizador agora coleta
+  templates de interface e de enum e remove ambos antes da sema.
+- Aplicações `Maybe<int>` geram `EnumDeclaration` sintética com variantes
+  substituídas; campos recursivos viram `Box` pela regra existente. O nome
+  canônico é a aplicação (`Maybe<int>`).
+- Construção/match usam o caminho do template (`Maybe.Some`, `Maybe.None`). O
+  sema resolve a instância pelo tipo esperado (anotação/parâmetro/retorno/campo)
+  e aceita o nome-base no pattern quando `enum_name` começa com `Base<`.
+  Variantes sem payload também usam o tipo esperado.
+- Sem inferência de `T` apenas pelos argumentos do construtor; sem métodos/impl
+  genéricos, argumentos explícitos, funções sobre `Maybe<T>` ou FFI.
+  Teste `generic_enums_contract.rs`, exemplo `examples/generic-enums.lift`, docs
+  `docs/generic-enums*.md`.

@@ -1,0 +1,36 @@
+// EN: Generic enums monomorphized per concrete use.
+// PT-BR: Enums genéricos monomorfizados por uso concreto.
+enum Maybe<T> { Some(T), None }
+
+const some: Maybe<int> = Maybe.Some(5);
+match some {
+    Maybe.Some(inner) => { console.log(inner); }
+    Maybe.None => { console.log(0); }
+}
+
+const none: Maybe<string> = Maybe.None;
+match none {
+    Maybe.Some(text) => { console.log(text); }
+    Maybe.None => { console.log("none"); }
+}
+
+enum List<T> { Nil, Cons(T, List<T>) }
+
+function sum(list: List<int>): int {
+    match list {
+        List.Nil => { return 0; }
+        List.Cons(head, tail) => { return head + sum(tail); }
+    }
+}
+
+const values: List<int> = List.Cons(1, List.Cons(2, List.Nil));
+console.log(sum(values));
+
+enum Pair2<A, B> { Pair(A, B) }
+const pair: Pair2<int, string> = Pair2.Pair(1, "x");
+match pair {
+    Pair2.Pair(left, right) => {
+        console.log(left);
+        console.log(right);
+    }
+}

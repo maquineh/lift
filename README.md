@@ -256,6 +256,20 @@ A variant is constructed with `Shape.Circle(2.0)`, a named-field variant with `S
 
 Closures can mutate captured `let` variables; the generated Rust stores such captures in `Rc<RefCell<T>>`, keeping state across calls while preserving the `Rc<dyn Fn>` callback type. Captures are still snapshots: mutations do not update the outer variable, so use the closure return value, `reduce`, or `for...of` to accumulate outside. See [mutable captures](docs/fnmut.md).
 
+## Generic enums
+
+Generic enums are monomorphized like containers:
+
+```lift
+enum Maybe<T> { Some(T), None }
+enum List<T> { Nil, Cons(T, List<T>) }
+
+const some: Maybe<int> = Maybe.Some(5);
+const values: List<int> = List.Cons(1, List.Cons(2, List.Nil));
+```
+
+Construction uses `Maybe.Some(5)`/`Maybe.None` and requires an expected type to choose the instantiation; `match` uses the template path and is exhaustive over the concrete variants. Recursion, named fields, arrays and nested containers work through the same monomorphizer. No generic methods, explicit type arguments, functions over `Maybe<T>`, or FFI generic enums yet. See [generic enums](docs/generic-enums.md).
+
 ## Generic containers
 
 Generic interfaces describe containers monomorphized per concrete use:
@@ -399,6 +413,7 @@ The service exercises the documented SQL/scalar and static HTTP contracts. See t
 - `examples/fnmut.lift` — mutable closure state with independent counters.
 - `examples/generic-containers.lift` — `Box<T>`, nested containers, `Pair<A,B>` and a `Map<K,V>`-shaped interface.
 - `examples/capture-fields.lift` — field and method mutation of captured structs.
+- `examples/generic-enums.lift` — `Maybe<T>`, recursive `List<T>`, named generic variants and matching.
 - `examples/notes-service/main.lift` — starts the HTTP/SQLite local service proof of concept.
 - `examples/notes-service/db-smoke.lift` — exercises `save_note` and `list_notes` through safe FFI.
 

@@ -632,6 +632,31 @@ fn fnmut_example_runs_mutable_closure_state() {
 }
 
 #[test]
+fn generic_enums_example_runs_monomorphized_variants() {
+    let directory = TempDir::new("generic-enums");
+    let source = directory.path().join("generic-enums.lift");
+    fs::write(
+        &source,
+        include_str!("../../../examples/generic-enums.lift"),
+    )
+    .unwrap();
+    let expected = "5\nnone\n3\n1\nx\n";
+    for command in ["check", "build", "run"] {
+        let output = cli().arg(command).arg(&source).output().unwrap();
+        assert_success(&output, &format!("generic-enums {command}"));
+    }
+    let binary = directory.path().join(binary_name("generic-enums"));
+    let output = Command::new(binary).output().unwrap();
+    assert_success(&output, "binário generic-enums");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        expected
+    );
+}
+
+#[test]
 fn capture_fields_example_runs_field_and_method_mutation() {
     let directory = TempDir::new("capture-fields");
     let source = directory.path().join("capture-fields.lift");

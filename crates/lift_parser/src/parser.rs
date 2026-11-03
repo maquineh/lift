@@ -217,6 +217,16 @@ impl<'tokens> Parser<'tokens> {
     fn parse_enum_declaration(&mut self) -> Result<EnumDeclaration, ParseError> {
         let start = self.expect(is_enum, "`enum`")?.start;
         let name = self.parse_identifier()?;
+        let mut type_parameters = Vec::new();
+        if self.consume(|token| matches!(token, Token::Less)).is_some() {
+            loop {
+                type_parameters.push(self.parse_identifier()?);
+                if self.consume(is_comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(|token| matches!(token, Token::Greater), "`>`")?;
+        }
         self.expect(is_left_brace, "`{`")?;
         let mut variants = Vec::new();
         while !self.check(is_right_brace) && !self.is_at_end() {
@@ -280,6 +290,7 @@ impl<'tokens> Parser<'tokens> {
         let close = self.expect(is_right_brace, "`}`")?.end;
         Ok(EnumDeclaration {
             name,
+            type_parameters,
             variants,
             span: self.span(start, close),
         })

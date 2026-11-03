@@ -144,6 +144,8 @@ pub struct UnionDeclaration {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnumDeclaration {
     pub name: Identifier,
+    /// Parâmetros de tipo de um enum genérico (`enum Option<T>`).
+    pub type_parameters: Vec<Identifier>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
 }

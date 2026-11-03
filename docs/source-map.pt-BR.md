@@ -79,6 +79,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `crates/lift_sema/tests/liveness_contract.rs` | Elegibilidade e contraexemplos conservadores em joins, retornos, loops, reatribuições, chamadas, parâmetros emprestados e projeções. |
 | `crates/lift_sema/tests/option_contract.rs` | Tipos/null, modos de coalesce lazy, campos opcionais obrigatórios versus omitíveis, narrowing de fluxo (ramos, guardas, else-if, loops, captures, mutações rejeitadas), limites de inferência, ciclos, rejeição de FFI aninhada/struct local e ownership conservador. |
 | `crates/lift_sema/tests/ffi_structs_options_contract.rs` | Resolução de layouts externos e dependências, validação de campo/tipo, aceite e rejeição de structs/Option/Result no FFI e modos de parâmetro emprestados. |
+| `crates/lift_sema/tests/generic_enums_contract.rs` | Declaração de enums genéricos, monomorfização/substituição, campos recursivos Box, variantes nomeadas, containers. |
 | `crates/lift_sema/tests/generic_containers_contract.rs` | Declaração de interface genérica, monomorfização/substituição, containers aninhados, validação de aridade/duplicatas. |
 | `crates/lift_sema/tests/generics_contract.rs` | Declaração de função genérica, inferência por chamada, containers/optionals, chamadas aninhadas, parâmetros inválidos e rejeição como valor. |
 | `crates/lift_sema/tests/union_contract.rs` | Declarações `type A = B | C`, validação de membros, desaçucaramento para enum, construção por object literal, match exaustivo, membros enum e uniões recursivas. |
@@ -101,6 +102,7 @@ compila e executa `examples/methods-closures-templates.lift`, comparando stdout.
 | `examples/option.lift` | Contadores para LHS única/fallback lazy, arrays e campos opcionais (omitidos e explícitos), narrowing entre guardas e loops e preservação de origens. |
 | `examples/capture-fields.lift` | Mutação de campo/método em structs capturadas via `Rc<RefCell<T>>`. |
 | `examples/fnmut.lift` | Captures mutáveis de closure com estado persistente independente. |
+| `examples/generic-enums.lift` | `Maybe<T>`, `List<T>` recursivo, variantes nomeadas genéricas, matching. |
 | `examples/generic-containers.lift` | `Box<T>`, containers aninhados, `Pair<A,B>`, interface Map-shaped e execução nativa. |
 | `examples/generics.lift` | Identidade/igualdade/containers genéricos inferidos e execução nativa. |
 | `examples/unions.lift` | Uniões `type A = B | C`, construção por object literal, matching exaustivo, membros enum e recursão. |

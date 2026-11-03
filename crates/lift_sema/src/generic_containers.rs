@@ -1,5 +1,5 @@
-//! Monomorphization of generic interfaces (`Box<T>`, `Map<K, V>`) into
-//! synthetic concrete interface declarations before semantic analysis.
+//! Monomorphization of generic interfaces/enums (`Box<T>`, `Option<T>`) into
+//! synthetic concrete declarations before semantic analysis.
 //!
 //! PT-BR: monomorfização de interfaces genéricas em declarações concretas.
 
@@ -12,63 +12,87 @@ use lift_ast::{
 
 use crate::{SemaError, SemaErrorKind};
 
-pub(super) fn expand_generic_interfaces(ast: &mut ProgramAst, errors: &mut Vec<SemaError>) {
-    let mut templates = HashMap::new();
+pub(super) fn expand_generic_containers(ast: &mut ProgramAst, errors: &mut Vec<SemaError>) {
+    let mut interface_templates = HashMap::new();
+    let mut enum_templates = HashMap::new();
     for declaration in &ast.declarations {
-        let Declaration::Interface(interface) = declaration else {
-            continue;
-        };
-        if interface.type_parameters.is_empty() {
-            continue;
-        }
-        let mut seen = HashSet::new();
-        for parameter in &interface.type_parameters {
-            if !seen.insert(parameter.name.clone()) {
-                errors.push(SemaError::new(
-                    SemaErrorKind::DuplicateParameter,
-                    format!(
-                        "parâmetro de tipo duplicado `{}` em `{}`",
-                        parameter.name, interface.name.name
-                    ),
-                    parameter.span,
-                ));
+        match declaration {
+            Declaration::Interface(interface) if !interface.type_parameters.is_empty() => {
+                validate_parameters(&interface.name, &interface.type_parameters, errors);
+                interface_templates.insert(interface.name.name.clone(), interface.clone());
             }
+            Declaration::Enum(enumeration) if !enumeration.type_parameters.is_empty() => {
+                validate_parameters(&enumeration.name, &enumeration.type_parameters, errors);
+                enum_templates.insert(enumeration.name.name.clone(), enumeration.clone());
+            }
+            _ => {}
         }
-        templates.insert(interface.name.name.clone(), interface.clone());
     }
-    if templates.is_empty() && !ast.declarations.iter().any(is_generic_interface_type) {
+    if interface_templates.is_empty() && enum_templates.is_empty() {
         return;
     }
 
-    ast.declarations
-        .retain(|declaration| !matches!(declaration, Declaration::Interface(interface) if !interface.type_parameters.is_empty()));
+    ast.declarations.retain(|declaration| match declaration {
+        Declaration::Interface(interface) => interface.type_parameters.is_empty(),
+        Declaration::Enum(enumeration) => enumeration.type_parameters.is_empty(),
+        _ => true,
+    });
 
     let mut monomorphizer = Monomorphizer {
-        templates,
-        generated: HashMap::new(),
+        interface_templates,
+        enum_templates,
+        generated_interfaces: HashMap::new(),
+        generated_enums: HashMap::new(),
         order: Vec::new(),
         errors,
     };
     for declaration in &mut ast.declarations {
         monomorphizer.declaration(declaration);
     }
-    for name in monomorphizer.order.clone() {
-        if let Some(interface) = monomorphizer.generated.remove(&name) {
-            ast.declarations.push(Declaration::Interface(interface));
+    for (name, kind) in monomorphizer.order.clone() {
+        match kind {
+            GeneratedKind::Interface => {
+                if let Some(interface) = monomorphizer.generated_interfaces.remove(&name) {
+                    ast.declarations.push(Declaration::Interface(interface));
+                }
+            }
+            GeneratedKind::Enum => {
+                if let Some(enumeration) = monomorphizer.generated_enums.remove(&name) {
+                    ast.declarations.push(Declaration::Enum(enumeration));
+                }
+            }
         }
     }
 }
 
-fn is_generic_interface_type(_declaration: &Declaration) -> bool {
-    // Usado apenas para evitar montar o monomorphizer quando não há templates;
-    // aplicações órfãs continuam caindo no erro semântico normal.
-    false
+fn validate_parameters(name: &Identifier, parameters: &[Identifier], errors: &mut Vec<SemaError>) {
+    let mut seen = HashSet::new();
+    for parameter in parameters {
+        if !seen.insert(parameter.name.clone()) {
+            errors.push(SemaError::new(
+                SemaErrorKind::DuplicateParameter,
+                format!(
+                    "parâmetro de tipo duplicado `{}` em `{}`",
+                    parameter.name, name.name
+                ),
+                parameter.span,
+            ));
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GeneratedKind {
+    Interface,
+    Enum,
 }
 
 struct Monomorphizer<'a> {
-    templates: HashMap<String, InterfaceDeclaration>,
-    generated: HashMap<String, InterfaceDeclaration>,
-    order: Vec<String>,
+    interface_templates: HashMap<String, InterfaceDeclaration>,
+    enum_templates: HashMap<String, lift_ast::EnumDeclaration>,
+    generated_interfaces: HashMap<String, InterfaceDeclaration>,
+    generated_enums: HashMap<String, lift_ast::EnumDeclaration>,
+    order: Vec<(String, GeneratedKind)>,
     errors: &'a mut Vec<SemaError>,
 }
 
@@ -266,66 +290,136 @@ impl Monomorphizer<'_> {
                 for argument in arguments.iter_mut() {
                     self.ty(argument);
                 }
-                let Some(template) = self.templates.get(&name.name).cloned() else {
-                    return;
-                };
-                if template.type_parameters.len() != arguments.len() {
-                    self.errors.push(SemaError::new(
-                        SemaErrorKind::ArgumentCountMismatch,
-                        format!(
-                            "container `{}` espera {} argumento(s) de tipo, recebeu {}",
-                            name.name,
-                            template.type_parameters.len(),
-                            arguments.len()
-                        ),
-                        ty.span,
-                    ));
-                    return;
-                }
-                let canonical = canonical_name(&name.name, arguments);
-                if !self.generated.contains_key(&canonical) {
-                    self.generated.insert(
-                        canonical.clone(),
-                        InterfaceDeclaration {
-                            name: Identifier {
-                                name: canonical.clone(),
-                                span: name.span,
+                if let Some(template) = self.interface_templates.get(&name.name).cloned() {
+                    if template.type_parameters.len() != arguments.len() {
+                        self.errors.push(SemaError::new(
+                            SemaErrorKind::ArgumentCountMismatch,
+                            format!(
+                                "container `{}` espera {} argumento(s) de tipo, recebeu {}",
+                                name.name,
+                                template.type_parameters.len(),
+                                arguments.len()
+                            ),
+                            ty.span,
+                        ));
+                        return;
+                    }
+                    let canonical = canonical_name(&name.name, arguments);
+                    if !self.generated_interfaces.contains_key(&canonical)
+                        && !self.generated_enums.contains_key(&canonical)
+                    {
+                        self.generated_interfaces.insert(
+                            canonical.clone(),
+                            InterfaceDeclaration {
+                                name: Identifier {
+                                    name: canonical.clone(),
+                                    span: name.span,
+                                },
+                                type_parameters: Vec::new(),
+                                fields: Vec::new(),
+                                span: template.span,
                             },
-                            type_parameters: Vec::new(),
-                            fields: Vec::new(),
-                            span: template.span,
-                        },
-                    );
-                    self.order.push(canonical.clone());
-                    let substitutions = template
-                        .type_parameters
-                        .iter()
-                        .map(|parameter| parameter.name.clone())
-                        .zip(arguments.iter().cloned())
-                        .collect::<HashMap<_, _>>();
-                    let mut fields = template
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            let mut field = field.clone();
-                            field.ty = substitute(&field.ty, &substitutions);
-                            field
-                        })
-                        .collect::<Vec<_>>();
-                    for field in &mut fields {
-                        self.ty(&mut field.ty);
+                        );
+                        self.order
+                            .push((canonical.clone(), GeneratedKind::Interface));
+                        let substitutions = substitutions(&template.type_parameters, arguments);
+                        let mut fields = template
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                let mut field = field.clone();
+                                field.ty = substitute(&field.ty, &substitutions);
+                                field
+                            })
+                            .collect::<Vec<_>>();
+                        for field in &mut fields {
+                            self.ty(&mut field.ty);
+                        }
+                        if let Some(generated) = self.generated_interfaces.get_mut(&canonical) {
+                            generated.fields = fields;
+                        }
                     }
-                    if let Some(generated) = self.generated.get_mut(&canonical) {
-                        generated.fields = fields;
+                    ty.kind = TypeExpressionKind::Named(Identifier {
+                        name: canonical,
+                        span: name.span,
+                    });
+                } else if let Some(template) = self.enum_templates.get(&name.name).cloned() {
+                    if template.type_parameters.len() != arguments.len() {
+                        self.errors.push(SemaError::new(
+                            SemaErrorKind::ArgumentCountMismatch,
+                            format!(
+                                "enum genérico `{}` espera {} argumento(s) de tipo, recebeu {}",
+                                name.name,
+                                template.type_parameters.len(),
+                                arguments.len()
+                            ),
+                            ty.span,
+                        ));
+                        return;
                     }
+                    let canonical = canonical_name(&name.name, arguments);
+                    if !self.generated_interfaces.contains_key(&canonical)
+                        && !self.generated_enums.contains_key(&canonical)
+                    {
+                        self.generated_enums.insert(
+                            canonical.clone(),
+                            lift_ast::EnumDeclaration {
+                                name: Identifier {
+                                    name: canonical.clone(),
+                                    span: name.span,
+                                },
+                                type_parameters: Vec::new(),
+                                variants: Vec::new(),
+                                span: template.span,
+                            },
+                        );
+                        self.order.push((canonical.clone(), GeneratedKind::Enum));
+                        let substitutions = substitutions(&template.type_parameters, arguments);
+                        let mut variants = template
+                            .variants
+                            .iter()
+                            .map(|variant| {
+                                let mut variant = variant.clone();
+                                for field in &mut variant.fields {
+                                    *field = substitute(field, &substitutions);
+                                }
+                                for field in &mut variant.named_fields {
+                                    field.ty = substitute(&field.ty, &substitutions);
+                                }
+                                variant
+                            })
+                            .collect::<Vec<_>>();
+                        for variant in &mut variants {
+                            for field in &mut variant.fields {
+                                self.ty(field);
+                            }
+                            for field in &mut variant.named_fields {
+                                self.ty(&mut field.ty);
+                            }
+                        }
+                        if let Some(generated) = self.generated_enums.get_mut(&canonical) {
+                            generated.variants = variants;
+                        }
+                    }
+                    ty.kind = TypeExpressionKind::Named(Identifier {
+                        name: canonical,
+                        span: name.span,
+                    });
                 }
-                ty.kind = TypeExpressionKind::Named(Identifier {
-                    name: canonical,
-                    span: name.span,
-                });
             }
         }
     }
+}
+
+fn substitutions(
+    parameters: &[Identifier],
+    arguments: &[TypeExpression],
+) -> HashMap<String, TypeExpression> {
+    parameters
+        .iter()
+        .map(|parameter| parameter.name.clone())
+        .zip(arguments.iter().cloned())
+        .collect()
 }
 
 fn substitute(

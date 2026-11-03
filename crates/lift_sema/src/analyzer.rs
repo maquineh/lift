@@ -313,7 +313,7 @@ pub(super) fn analyze_context(
 ) -> Result<HirProgram, Vec<SemaError>> {
     let mut ast = lower_impls(ast)?;
     let mut generic_errors = Vec::new();
-    crate::generic_containers::expand_generic_interfaces(&mut ast, &mut generic_errors);
+    crate::generic_containers::expand_generic_containers(&mut ast, &mut generic_errors);
     if !generic_errors.is_empty() {
         return Err(generic_errors);
     }
@@ -2419,6 +2419,71 @@ impl<'a> BodyChecker<'a> {
             if let Some(operation) = self.result_constructor(call) {
                 return self.check_result_constructor(expression.span, operation, call, expected);
             }
+            if let ExpressionKind::FieldAccess(access) = &call.callee.kind {
+                if let ExpressionKind::Identifier(base) = &access.object.kind {
+                    if let ResolvedType::Struct(instance) = expected {
+                        if instance.starts_with(&format!("{}<", base.name))
+                            && self.enums.contains_key(instance)
+                        {
+                            return self.check_enum_constructor(
+                                expression.span,
+                                instance,
+                                &access.field.name,
+                                call,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        if let ExpressionKind::FieldAccess(access) = &expression.kind {
+            if let ExpressionKind::Identifier(base) = &access.object.kind {
+                if let ResolvedType::Struct(instance) = expected {
+                    if instance.starts_with(&format!("{}<", base.name))
+                        && self.enums.contains_key(instance)
+                    {
+                        let variant = self
+                            .enums
+                            .get(instance)
+                            .and_then(|info| {
+                                info.variants
+                                    .iter()
+                                    .find(|variant| variant.name == access.field.name)
+                            })
+                            .cloned()
+                            .ok_or_else(|| {
+                                SemaError::new(
+                                    SemaErrorKind::UnknownField,
+                                    format!(
+                                        "enum `{instance}` não tem variante `{}`",
+                                        access.field.name
+                                    ),
+                                    access.field.span,
+                                )
+                            })?;
+                        if !variant.fields.is_empty() || !variant.named_fields.is_empty() {
+                            return Err(SemaError::new(
+                                SemaErrorKind::ArgumentCountMismatch,
+                                format!(
+                                    "variante `{instance}.{}` exige payload; chame-a",
+                                    access.field.name
+                                ),
+                                expression.span,
+                            ));
+                        }
+                        return Ok(self.expr(
+                            HirExprKind::EnumConstruct {
+                                enum_name: instance.clone(),
+                                variant: access.field.name.clone(),
+                                fields: Vec::new(),
+                                named_fields: Vec::new(),
+                            },
+                            ResolvedType::Struct(instance.clone()),
+                            expression.span,
+                        ));
+                    }
+                }
+            }
         }
         if let ExpressionKind::Binary(binary) = &expression.kind {
             if binary.operator == BinaryOperator::Coalesce {
@@ -3094,7 +3159,9 @@ impl<'a> BodyChecker<'a> {
                     variant,
                     bindings,
                 } => {
-                    if pattern_enum.name != enum_name {
+                    if pattern_enum.name != enum_name
+                        && !enum_name.starts_with(&format!("{}<", pattern_enum.name))
+                    {
                         return Err(SemaError::new(
                             SemaErrorKind::InvalidMatch,
                             format!(
